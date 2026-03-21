@@ -6,6 +6,8 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../theme/app_theme.dart';
 import '../models/user_model.dart';
 import '../models/vehicle_model.dart';
+import '../models/quota_model.dart';
+import '../services/quota_service.dart';
 import '../database/db_helper.dart';
 import '../widgets/custom_button.dart';
 
@@ -284,7 +286,7 @@ class _VehiclesScreenState extends State<VehiclesScreen>
       code = _generatePassCode();
     } while (await _db.fuelPassCodeExists(code));
 
-    final success = await _db.setFuelPassCode(v.id!, code);
+    final success = await _db.setFuelPassCode(v.id!, code, v.type);
     if (!mounted) return;
 
     if (success) {
@@ -829,11 +831,41 @@ class _VehicleCard extends StatelessWidget {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// Fuel Pass Bottom-Sheet
+// Fuel Pass Bottom-Sheet  (StatefulWidget — loads live quota)
 // ═════════════════════════════════════════════════════════════════════════════
-class _FuelPassSheet extends StatelessWidget {
+class _FuelPassSheet extends StatefulWidget {
   final VehicleModel vehicle;
   const _FuelPassSheet({required this.vehicle});
+  @override
+  State<_FuelPassSheet> createState() => _FuelPassSheetState();
+}
+
+class _FuelPassSheetState extends State<_FuelPassSheet> {
+  final _db = DbHelper();
+  FuelQuotaModel? _quota;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadQuota();
+  }
+
+  Future<void> _loadQuota() async {
+    if (widget.vehicle.id == null) {
+      setState(() => _loading = false);
+      return;
+    }
+    final q = await _db.getCurrentWeekQuota(
+      widget.vehicle.id!,
+      widget.vehicle.type,
+    );
+    if (mounted)
+      setState(() {
+        _quota = q;
+        _loading = false;
+      });
+  }
 
   String _formatDate(DateTime d) {
     const m = [
@@ -856,13 +888,12 @@ class _FuelPassSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final accent = vehicleTypeColor(vehicle.type);
-    final code = vehicle.fuelPassCode ?? '';
-
-    // QR payload — JSON-like compact string
+    final accent = vehicleTypeColor(widget.vehicle.type);
+    final code = widget.vehicle.fuelPassCode ?? '';
     final qrData =
-        'FUELIX|${vehicle.fuelPassCode}|${vehicle.registrationNo}|'
-        '${vehicle.make} ${vehicle.model}|${vehicle.year}|${vehicle.fuelType}';
+        'FUELIX|${widget.vehicle.fuelPassCode}|${widget.vehicle.registrationNo}|'
+        '${widget.vehicle.make} ${widget.vehicle.model}'
+        '|${widget.vehicle.year}|${widget.vehicle.fuelType}';
 
     return Container(
       decoration: BoxDecoration(
@@ -895,7 +926,7 @@ class _FuelPassSheet extends StatelessWidget {
                   gradient: LinearGradient(
                     colors: [
                       accent,
-                      accent.withOpacity(0.7),
+                      accent.withOpacity(0.75),
                       AppColors.ocean.withOpacity(0.85),
                     ],
                     begin: Alignment.topLeft,
@@ -924,7 +955,7 @@ class _FuelPassSheet extends StatelessWidget {
                               color: Colors.white.withOpacity(0.2),
                             ),
                             child: Icon(
-                              vehicleTypeIcon(vehicle.type),
+                              vehicleTypeIcon(widget.vehicle.type),
                               size: 22,
                               color: Colors.white,
                             ),
@@ -944,9 +975,9 @@ class _FuelPassSheet extends StatelessWidget {
                                   ),
                                 ),
                                 Text(
-                                  vehicle.displayName,
+                                  widget.vehicle.displayName,
                                   style: GoogleFonts.spaceGrotesk(
-                                    fontSize: 16,
+                                    fontSize: 15,
                                     fontWeight: FontWeight.w700,
                                     color: Colors.white,
                                   ),
@@ -954,7 +985,6 @@ class _FuelPassSheet extends StatelessWidget {
                               ],
                             ),
                           ),
-                          // Fuelix logo mini
                           Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 10,
@@ -991,7 +1021,7 @@ class _FuelPassSheet extends StatelessWidget {
                           QrImageView(
                             data: qrData,
                             version: QrVersions.auto,
-                            size: 180,
+                            size: 175,
                             eyeStyle: const QrEyeStyle(
                               eyeShape: QrEyeShape.square,
                               color: Color(0xFF111827),
@@ -1002,7 +1032,6 @@ class _FuelPassSheet extends StatelessWidget {
                             ),
                           ),
                           const SizedBox(height: 12),
-                          // Pass code display
                           Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 16,
@@ -1016,7 +1045,6 @@ class _FuelPassSheet extends StatelessWidget {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Text(
-                                  // Format: 3Z56 Q57C
                                   '${code.substring(0, 4)} ${code.substring(4)}',
                                   style: GoogleFonts.spaceGrotesk(
                                     fontSize: 22,
@@ -1058,20 +1086,20 @@ class _FuelPassSheet extends StatelessWidget {
                           Expanded(
                             child: _PassDetail(
                               label: 'REG NO',
-                              value: vehicle.registrationNo,
+                              value: widget.vehicle.registrationNo,
                             ),
                           ),
                           Expanded(
                             child: _PassDetail(
                               label: 'FUEL TYPE',
-                              value: vehicle.fuelType,
+                              value: widget.vehicle.fuelType,
                             ),
                           ),
                           Expanded(
                             child: _PassDetail(
                               label: 'ISSUED',
-                              value: vehicle.qrGeneratedAt != null
-                                  ? _formatDate(vehicle.qrGeneratedAt!)
+                              value: widget.vehicle.qrGeneratedAt != null
+                                  ? _formatDate(widget.vehicle.qrGeneratedAt!)
                                   : '—',
                             ),
                           ),
@@ -1084,71 +1112,53 @@ class _FuelPassSheet extends StatelessWidget {
             ),
             const SizedBox(height: 20),
 
+            // ── Weekly Quota Card ─────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: _loading
+                  ? const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(20),
+                        child: CircularProgressIndicator(
+                          color: AppColors.emerald,
+                          strokeWidth: 2,
+                        ),
+                      ),
+                    )
+                  : _quota != null
+                  ? _QuotaCard(
+                      quota: _quota!,
+                      vehicleType: widget.vehicle.type,
+                      isDark: isDark,
+                    )
+                  : const SizedBox.shrink(),
+            ),
+            const SizedBox(height: 16),
+
             // ── Info notice ───────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  color: AppColors.ocean.withOpacity(isDark ? 0.08 : 0.05),
-                  border: Border.all(color: AppColors.ocean.withOpacity(0.2)),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.info_outline_rounded,
-                      size: 16,
-                      color: AppColors.ocean,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'Show this QR code at fuel stations to authorise refuelling. '
-                        'This pass is unique to this vehicle and cannot be transferred.',
-                        style: GoogleFonts.inter(
-                          fontSize: 12,
-                          color: AppColors.ocean,
-                          height: 1.5,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+              child: _Notice(
+                icon: Icons.info_outline_rounded,
+                color: AppColors.ocean,
+                isDark: isDark,
+                text:
+                    'Show this QR code at fuel stations to authorise refuelling. '
+                    'This pass is unique to this vehicle and cannot be transferred.',
               ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 12),
 
             // ── Lock notice ───────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 0, 24, 36),
-              child: Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  color: AppColors.amber.withOpacity(isDark ? 0.08 : 0.05),
-                  border: Border.all(color: AppColors.amber.withOpacity(0.2)),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.lock_rounded,
-                      size: 16,
-                      color: AppColors.amber,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'Vehicle details are locked. The Fuel Pass code cannot be regenerated.',
-                        style: GoogleFonts.inter(
-                          fontSize: 12,
-                          color: AppColors.amber,
-                          height: 1.5,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+              child: _Notice(
+                icon: Icons.lock_rounded,
+                color: AppColors.amber,
+                isDark: isDark,
+                text:
+                    'Vehicle details are locked. '
+                    'The Fuel Pass code cannot be regenerated.',
               ),
             ),
           ],
@@ -1156,6 +1166,326 @@ class _FuelPassSheet extends StatelessWidget {
       ),
     );
   }
+}
+
+// ─── Weekly Quota Card ────────────────────────────────────────────────────────
+class _QuotaCard extends StatelessWidget {
+  final FuelQuotaModel quota;
+  final String vehicleType;
+  final bool isDark;
+
+  const _QuotaCard({
+    required this.quota,
+    required this.vehicleType,
+    required this.isDark,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final remaining = quota.remainingLitres;
+    final used = quota.usedLitres;
+    final total = quota.quotaLitres;
+    final pct = quota.usedPercent;
+    final exhausted = quota.isExhausted;
+
+    // Gauge colour: green → amber → red as usage grows
+    Color gaugeColor;
+    if (pct < 0.5)
+      gaugeColor = AppColors.emerald;
+    else if (pct < 0.85)
+      gaugeColor = AppColors.amber;
+    else
+      gaugeColor = AppColors.error;
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+        border: Border.all(
+          color: exhausted
+              ? AppColors.error.withOpacity(0.4)
+              : (isDark ? AppColors.darkBorder : AppColors.lightBorder),
+          width: exhausted ? 1.5 : 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Header ───────────────────────────────────────────────────
+          Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(10),
+                  gradient: LinearGradient(
+                    colors: exhausted
+                        ? [AppColors.error, AppColors.error.withOpacity(0.7)]
+                        : [AppColors.emerald, AppColors.ocean],
+                  ),
+                ),
+                child: Icon(
+                  exhausted
+                      ? Icons.no_meals_rounded
+                      : Icons.local_gas_station_rounded,
+                  size: 17,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Weekly Fuel Quota',
+                      style: GoogleFonts.spaceGrotesk(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: isDark
+                            ? AppColors.darkText
+                            : AppColors.lightText,
+                      ),
+                    ),
+                    Text(
+                      QuotaService.weekLabel(quota.weekStart),
+                      style: GoogleFonts.inter(
+                        fontSize: 11,
+                        color: isDark
+                            ? AppColors.darkTextMuted
+                            : AppColors.lightTextMuted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // Days remaining badge
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(20),
+                  color: (exhausted ? AppColors.error : AppColors.emerald)
+                      .withOpacity(isDark ? 0.15 : 0.10),
+                  border: Border.all(
+                    color: (exhausted ? AppColors.error : AppColors.emerald)
+                        .withOpacity(0.35),
+                  ),
+                ),
+                child: Text(
+                  exhausted
+                      ? 'Exhausted'
+                      : QuotaService.daysRemainingLabel(now),
+                  style: GoogleFonts.spaceGrotesk(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: exhausted ? AppColors.error : AppColors.emerald,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+
+          // ── Big numbers row ───────────────────────────────────────────
+          Row(
+            children: [
+              _QuotaStat(
+                label: 'Remaining',
+                value: '${remaining.toStringAsFixed(1)} L',
+                color: exhausted ? AppColors.error : AppColors.emerald,
+                isDark: isDark,
+                large: true,
+              ),
+              _vDivider(isDark),
+              _QuotaStat(
+                label: 'Used',
+                value: '${used.toStringAsFixed(1)} L',
+                color: AppColors.amber,
+                isDark: isDark,
+              ),
+              _vDivider(isDark),
+              _QuotaStat(
+                label: 'Weekly Total',
+                value: '${total.toStringAsFixed(0)} L',
+                color: AppColors.ocean,
+                isDark: isDark,
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // ── Progress bar ──────────────────────────────────────────────
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: LinearProgressIndicator(
+                        value: pct,
+                        minHeight: 10,
+                        backgroundColor: isDark
+                            ? AppColors.darkSurfaceAlt
+                            : AppColors.lightSurfaceAlt,
+                        valueColor: AlwaysStoppedAnimation<Color>(gaugeColor),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          '${(pct * 100).toStringAsFixed(0)}% used',
+                          style: GoogleFonts.inter(
+                            fontSize: 11,
+                            color: isDark
+                                ? AppColors.darkTextMuted
+                                : AppColors.lightTextMuted,
+                          ),
+                        ),
+                        Text(
+                          'Resets next Monday',
+                          style: GoogleFonts.inter(
+                            fontSize: 11,
+                            color: isDark
+                                ? AppColors.darkTextMuted
+                                : AppColors.lightTextMuted,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          // ── Exhausted notice ──────────────────────────────────────────
+          if (exhausted) ...[
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                color: AppColors.error.withOpacity(isDark ? 0.12 : 0.07),
+                border: Border.all(color: AppColors.error.withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.warning_amber_rounded,
+                    size: 15,
+                    color: AppColors.error,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Your weekly quota is exhausted. '
+                      'Balance resets every Monday.',
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: AppColors.error,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _vDivider(bool isDark) => Container(
+    width: 1,
+    height: 36,
+    margin: const EdgeInsets.symmetric(horizontal: 12),
+    color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+  );
+}
+
+class _QuotaStat extends StatelessWidget {
+  final String label, value;
+  final Color color;
+  final bool isDark, large;
+  const _QuotaStat({
+    required this.label,
+    required this.value,
+    required this.color,
+    required this.isDark,
+    this.large = false,
+  });
+
+  @override
+  Widget build(BuildContext context) => Expanded(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Text(
+          value,
+          style: GoogleFonts.spaceGrotesk(
+            fontSize: large ? 22 : 17,
+            fontWeight: FontWeight.w800,
+            color: color,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          label,
+          style: GoogleFonts.inter(
+            fontSize: 11,
+            color: isDark ? AppColors.darkTextMuted : AppColors.lightTextMuted,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _Notice extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final bool isDark;
+  final String text;
+  const _Notice({
+    required this.icon,
+    required this.color,
+    required this.isDark,
+    required this.text,
+  });
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(12),
+      color: color.withOpacity(isDark ? 0.08 : 0.05),
+      border: Border.all(color: color.withOpacity(0.2)),
+    ),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 16, color: color),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            text,
+            style: GoogleFonts.inter(fontSize: 12, color: color, height: 1.5),
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 class _PassDetail extends StatelessWidget {
