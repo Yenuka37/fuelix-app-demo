@@ -29,7 +29,6 @@ class _ProfileScreenState extends State<ProfileScreen>
       begin: const Offset(0, 0.06),
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _animController, curve: Curves.easeOut));
-
     Future.delayed(const Duration(milliseconds: 80), () {
       if (mounted) _animController.forward();
     });
@@ -47,10 +46,15 @@ class _ProfileScreenState extends State<ProfileScreen>
     super.dispose();
   }
 
+  // ── Sign-out confirm ──────────────────────────────────────────────────────
   void _confirmLogout() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
+        backgroundColor: isDark
+            ? AppColors.darkSurface
+            : AppColors.lightSurface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text(
           'Sign Out',
@@ -66,9 +70,7 @@ class _ProfileScreenState extends State<ProfileScreen>
             child: Text(
               'Cancel',
               style: GoogleFonts.spaceGrotesk(
-                color: Theme.of(context).brightness == Brightness.dark
-                    ? AppColors.darkTextSub
-                    : AppColors.lightTextSub,
+                color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -79,7 +81,7 @@ class _ProfileScreenState extends State<ProfileScreen>
               Navigator.pushNamedAndRemoveUntil(
                 context,
                 '/login',
-                (r) => false,
+                (_) => false,
               );
             },
             child: Text(
@@ -95,6 +97,35 @@ class _ProfileScreenState extends State<ProfileScreen>
     );
   }
 
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  String _formatDate(DateTime d) {
+    const m = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    return '${m[d.month - 1]} ${d.day}, ${d.year}';
+  }
+
+  String _buildAddress(UserModel u) {
+    final parts = [
+      u.addressLine1,
+      u.addressLine2,
+      u.addressLine3,
+    ].where((p) => p.isNotEmpty).toList();
+    return parts.isEmpty ? '—' : parts.join(', ');
+  }
+
+  // ── Build ─────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -119,46 +150,179 @@ class _ProfileScreenState extends State<ProfileScreen>
               child: CustomScrollView(
                 physics: const BouncingScrollPhysics(),
                 slivers: [
-                  // Top bar
+                  // ── Top bar ──────────────────────────────────────────────
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-                      child: _buildTopBar(isDark),
+                      child: _TopBar(isDark: isDark),
                     ),
                   ),
-                  // Avatar hero card
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(24, 28, 24, 0),
-                      child: _buildAvatarCard(isDark, user),
-                    ),
-                  ),
-                  // Info section
+                  // ── Avatar hero card ─────────────────────────────────────
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
-                      child: _buildInfoSection(isDark, user),
+                      child: _AvatarCard(user: user),
                     ),
                   ),
-                  // Account section
+                  // ── Personal info ────────────────────────────────────────
                   SliverToBoxAdapter(
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
-                      child: _buildAccountSection(isDark, user),
+                      padding: const EdgeInsets.fromLTRB(24, 22, 24, 0),
+                      child: _ProfileSection(
+                        title: 'PERSONAL INFORMATION',
+                        isDark: isDark,
+                        accentColor: AppColors.emerald,
+                        children: [
+                          _InfoTile(
+                            icon: Icons.person_outline_rounded,
+                            label: 'Full Name',
+                            value: user?.fullName ?? '—',
+                            isDark: isDark,
+                            accent: AppColors.emerald,
+                          ),
+                          _InfoTile(
+                            icon: Icons.badge_outlined,
+                            label: 'NIC Number',
+                            value: user?.nic ?? '—',
+                            isDark: isDark,
+                            accent: AppColors.emerald,
+                          ),
+                          _InfoTile(
+                            icon: Icons.phone_outlined,
+                            label: 'Mobile Number',
+                            value: user?.mobile.isNotEmpty == true
+                                ? user!.mobile
+                                : '—',
+                            isDark: isDark,
+                            accent: AppColors.emerald,
+                            isLast: true,
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                  // Options section
+                  // ── Address info ─────────────────────────────────────────
                   SliverToBoxAdapter(
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
-                      child: _buildOptionsSection(isDark),
+                      padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+                      child: _ProfileSection(
+                        title: 'ADDRESS',
+                        isDark: isDark,
+                        accentColor: AppColors.ocean,
+                        children: [
+                          _InfoTile(
+                            icon: Icons.home_outlined,
+                            label: 'Address',
+                            value: user != null ? _buildAddress(user) : '—',
+                            isDark: isDark,
+                            accent: AppColors.ocean,
+                            multiLine: true,
+                          ),
+                          _InfoTile(
+                            icon: Icons.place_outlined,
+                            label: 'District',
+                            value: user?.district.isNotEmpty == true
+                                ? user!.district
+                                : '—',
+                            isDark: isDark,
+                            accent: AppColors.ocean,
+                          ),
+                          _InfoTile(
+                            icon: Icons.map_outlined,
+                            label: 'Province',
+                            value: user?.province.isNotEmpty == true
+                                ? user!.province
+                                : '—',
+                            isDark: isDark,
+                            accent: AppColors.ocean,
+                          ),
+                          _InfoTile(
+                            icon: Icons.markunread_mailbox_outlined,
+                            label: 'Postal Code',
+                            value: user?.postalCode.isNotEmpty == true
+                                ? user!.postalCode
+                                : '—',
+                            isDark: isDark,
+                            accent: AppColors.ocean,
+                            isLast: true,
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                  // Sign out
+                  // ── Account details ──────────────────────────────────────
                   SliverToBoxAdapter(
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(24, 20, 24, 40),
-                      child: _buildSignOutButton(isDark),
+                      padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+                      child: _ProfileSection(
+                        title: 'ACCOUNT',
+                        isDark: isDark,
+                        accentColor: AppColors.amber,
+                        children: [
+                          _InfoTile(
+                            icon: Icons.email_outlined,
+                            label: 'Email Address',
+                            value: user?.email ?? '—',
+                            isDark: isDark,
+                            accent: AppColors.amber,
+                          ),
+                          _InfoTile(
+                            icon: Icons.calendar_today_outlined,
+                            label: 'Member Since',
+                            value: user?.createdAt != null
+                                ? _formatDate(user!.createdAt!)
+                                : '—',
+                            isDark: isDark,
+                            accent: AppColors.amber,
+                            isLast: true,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  // ── Preferences ──────────────────────────────────────────
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+                      child: _ProfileSection(
+                        title: 'PREFERENCES',
+                        isDark: isDark,
+                        accentColor: const Color(0xFF7C3AED),
+                        children: [
+                          _OptionTile(
+                            icon: Icons.notifications_outlined,
+                            label: 'Notifications',
+                            isDark: isDark,
+                            accent: const Color(0xFF7C3AED),
+                            onTap: () {},
+                          ),
+                          _OptionTile(
+                            icon: Icons.security_outlined,
+                            label: 'Privacy & Security',
+                            isDark: isDark,
+                            accent: const Color(0xFF7C3AED),
+                            onTap: () {},
+                          ),
+                          _OptionTile(
+                            icon: Icons.help_outline_rounded,
+                            label: 'Help & Support',
+                            isDark: isDark,
+                            accent: const Color(0xFF7C3AED),
+                            onTap: () {},
+                            isLast: true,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  // ── Sign out ─────────────────────────────────────────────
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(24, 20, 24, 48),
+                      child: _SignOutButton(
+                        onTap: _confirmLogout,
+                        isDark: isDark,
+                      ),
                     ),
                   ),
                 ],
@@ -169,8 +333,17 @@ class _ProfileScreenState extends State<ProfileScreen>
       ),
     );
   }
+}
 
-  Widget _buildTopBar(bool isDark) {
+// ═════════════════════════════════════════════════════════════════════════════
+// Top Bar
+// ═════════════════════════════════════════════════════════════════════════════
+class _TopBar extends StatelessWidget {
+  final bool isDark;
+  const _TopBar({required this.isDark});
+
+  @override
+  Widget build(BuildContext context) {
     return Row(
       children: [
         GestureDetector(
@@ -199,10 +372,23 @@ class _ProfileScreenState extends State<ProfileScreen>
       ],
     );
   }
+}
 
-  Widget _buildAvatarCard(bool isDark, UserModel? user) {
+// ═════════════════════════════════════════════════════════════════════════════
+// Avatar Hero Card
+// ═════════════════════════════════════════════════════════════════════════════
+class _AvatarCard extends StatelessWidget {
+  final UserModel? user;
+  const _AvatarCard({required this.user});
+
+  @override
+  Widget build(BuildContext context) {
+    final initials = user != null
+        ? '${user!.firstName[0]}${user!.lastName[0]}'.toUpperCase()
+        : 'U';
+
     return Container(
-      padding: const EdgeInsets.all(28),
+      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(24),
         gradient: const LinearGradient(
@@ -212,7 +398,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         ),
         boxShadow: [
           BoxShadow(
-            color: AppColors.emerald.withOpacity(0.32),
+            color: AppColors.emerald.withOpacity(0.30),
             blurRadius: 28,
             offset: const Offset(0, 12),
           ),
@@ -220,32 +406,49 @@ class _ProfileScreenState extends State<ProfileScreen>
       ),
       child: Row(
         children: [
-          // Big avatar circle
-          Container(
-            width: 72,
-            height: 72,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: Colors.white.withOpacity(0.2),
-              border: Border.all(
-                color: Colors.white.withOpacity(0.4),
-                width: 2,
-              ),
-            ),
-            child: Center(
-              child: Text(
-                user != null
-                    ? '${user.firstName[0]}${user.lastName[0]}'.toUpperCase()
-                    : 'U',
-                style: GoogleFonts.spaceGrotesk(
-                  fontSize: 26,
-                  fontWeight: FontWeight.w800,
-                  color: Colors.white,
+          // ── Avatar ───────────────────────────────────────────────────
+          Stack(
+            children: [
+              Container(
+                width: 76,
+                height: 76,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.white.withOpacity(0.18),
+                  border: Border.all(
+                    color: Colors.white.withOpacity(0.45),
+                    width: 2.5,
+                  ),
+                ),
+                child: Center(
+                  child: Text(
+                    initials,
+                    style: GoogleFonts.spaceGrotesk(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                    ),
+                  ),
                 ),
               ),
-            ),
+              // Online dot
+              Positioned(
+                bottom: 3,
+                right: 3,
+                child: Container(
+                  width: 14,
+                  height: 14,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: const Color(0xFF4ADE80),
+                    border: Border.all(color: Colors.white, width: 2),
+                  ),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 20),
+          const SizedBox(width: 18),
+          // ── Info ─────────────────────────────────────────────────────
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -258,44 +461,32 @@ class _ProfileScreenState extends State<ProfileScreen>
                     color: Colors.white,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 3),
                 Text(
                   user?.email ?? '',
                   overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.inter(
                     fontSize: 13,
-                    color: Colors.white.withOpacity(0.8),
+                    color: Colors.white.withOpacity(0.82),
                   ),
                 ),
                 const SizedBox(height: 10),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(20),
-                    color: Colors.white.withOpacity(0.18),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.verified_rounded,
-                        size: 12,
-                        color: Colors.white,
+                // Tags row
+                Row(
+                  children: [
+                    _HeroBadge(
+                      icon: Icons.verified_rounded,
+                      label: 'Verified',
+                      color: Colors.white.withOpacity(0.22),
+                    ),
+                    const SizedBox(width: 8),
+                    if (user?.province.isNotEmpty == true)
+                      _HeroBadge(
+                        icon: Icons.location_on_rounded,
+                        label: user!.province,
+                        color: Colors.white.withOpacity(0.15),
                       ),
-                      const SizedBox(width: 5),
-                      Text(
-                        'Verified Member',
-                        style: GoogleFonts.inter(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ],
-                  ),
+                  ],
                 ),
               ],
             ),
@@ -304,142 +495,58 @@ class _ProfileScreenState extends State<ProfileScreen>
       ),
     );
   }
+}
 
-  Widget _buildInfoSection(bool isDark, UserModel? user) {
-    return _ProfileSection(
-      title: 'Personal Information',
-      isDark: isDark,
-      children: [
-        _ProfileInfoTile(
-          icon: Icons.person_outline_rounded,
-          label: 'First Name',
-          value: user?.firstName ?? '—',
-          isDark: isDark,
-        ),
-        _ProfileInfoTile(
-          icon: Icons.person_outline_rounded,
-          label: 'Last Name',
-          value: user?.lastName ?? '—',
-          isDark: isDark,
-        ),
-        _ProfileInfoTile(
-          icon: Icons.badge_outlined,
-          label: 'NIC Number',
-          value: user?.nic ?? '—',
-          isDark: isDark,
-          isLast: true,
-        ),
-      ],
-    );
-  }
+class _HeroBadge extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  const _HeroBadge({
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
 
-  Widget _buildAccountSection(bool isDark, UserModel? user) {
-    return _ProfileSection(
-      title: 'Account Details',
-      isDark: isDark,
-      children: [
-        _ProfileInfoTile(
-          icon: Icons.email_outlined,
-          label: 'Email Address',
-          value: user?.email ?? '—',
-          isDark: isDark,
-        ),
-        _ProfileInfoTile(
-          icon: Icons.calendar_today_outlined,
-          label: 'Member Since',
-          value: user?.createdAt != null ? _formatDate(user!.createdAt!) : '—',
-          isDark: isDark,
-          isLast: true,
-        ),
-      ],
-    );
-  }
-
-  Widget _buildOptionsSection(bool isDark) {
-    return _ProfileSection(
-      title: 'Preferences',
-      isDark: isDark,
-      children: [
-        _ProfileOptionTile(
-          icon: Icons.notifications_outlined,
-          label: 'Notifications',
-          isDark: isDark,
-          onTap: () {},
-        ),
-        _ProfileOptionTile(
-          icon: Icons.security_outlined,
-          label: 'Privacy & Security',
-          isDark: isDark,
-          onTap: () {},
-        ),
-        _ProfileOptionTile(
-          icon: Icons.help_outline_rounded,
-          label: 'Help & Support',
-          isDark: isDark,
-          onTap: () {},
-          isLast: true,
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSignOutButton(bool isDark) {
-    return GestureDetector(
-      onTap: _confirmLogout,
-      child: Container(
-        height: 56,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(14),
-          color: AppColors.error.withOpacity(isDark ? 0.12 : 0.07),
-          border: Border.all(color: AppColors.error.withOpacity(0.3)),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.logout_rounded, size: 18, color: AppColors.error),
-            const SizedBox(width: 10),
-            Text(
-              'Sign Out',
-              style: GoogleFonts.spaceGrotesk(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-                color: AppColors.error,
-              ),
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        color: color,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 11, color: Colors.white),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: GoogleFonts.inter(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: Colors.white,
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
-
-  String _formatDate(DateTime date) {
-    const months = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-    return '${months[date.month - 1]} ${date.day}, ${date.year}';
-  }
 }
 
-// ─── Profile Section Container ────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════════════
+// Section Container
+// ═════════════════════════════════════════════════════════════════════════════
 class _ProfileSection extends StatelessWidget {
   final String title;
   final bool isDark;
+  final Color accentColor;
   final List<Widget> children;
 
   const _ProfileSection({
     required this.title,
     required this.isDark,
+    required this.accentColor,
     required this.children,
   });
 
@@ -448,20 +555,30 @@ class _ProfileSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 4, bottom: 10),
-          child: Text(
-            title,
-            style: GoogleFonts.spaceGrotesk(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: isDark
-                  ? AppColors.darkTextMuted
-                  : AppColors.lightTextMuted,
-              letterSpacing: 0.8,
+        // Section label with left accent line
+        Row(
+          children: [
+            Container(
+              width: 3,
+              height: 14,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(2),
+                color: accentColor,
+              ),
             ),
-          ),
+            const SizedBox(width: 8),
+            Text(
+              title,
+              style: GoogleFonts.spaceGrotesk(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: accentColor,
+                letterSpacing: 1.2,
+              ),
+            ),
+          ],
         ),
+        const SizedBox(height: 10),
         Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
@@ -477,20 +594,25 @@ class _ProfileSection extends StatelessWidget {
   }
 }
 
-// ─── Info Tile (read-only) ────────────────────────────────────────────────────
-class _ProfileInfoTile extends StatelessWidget {
+// ═════════════════════════════════════════════════════════════════════════════
+// Info Tile (read-only)
+// ═════════════════════════════════════════════════════════════════════════════
+class _InfoTile extends StatelessWidget {
   final IconData icon;
-  final String label;
-  final String value;
+  final String label, value;
   final bool isDark;
+  final Color accent;
   final bool isLast;
+  final bool multiLine;
 
-  const _ProfileInfoTile({
+  const _InfoTile({
     required this.icon,
     required this.label,
     required this.value,
     required this.isDark,
+    required this.accent,
     this.isLast = false,
+    this.multiLine = false,
   });
 
   @override
@@ -498,19 +620,22 @@ class _ProfileInfoTile extends StatelessWidget {
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
           child: Row(
+            crossAxisAlignment: multiLine
+                ? CrossAxisAlignment.start
+                : CrossAxisAlignment.center,
             children: [
               Container(
-                width: 36,
-                height: 36,
+                width: 34,
+                height: 34,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(10),
-                  color: AppColors.emerald.withOpacity(isDark ? 0.12 : 0.08),
+                  color: accent.withOpacity(isDark ? 0.12 : 0.07),
                 ),
-                child: Icon(icon, size: 17, color: AppColors.emerald),
+                child: Icon(icon, size: 16, color: accent),
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: 13),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -524,7 +649,7 @@ class _ProfileInfoTile extends StatelessWidget {
                             : AppColors.lightTextMuted,
                       ),
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 3),
                     Text(
                       value,
                       style: GoogleFonts.spaceGrotesk(
@@ -533,6 +658,7 @@ class _ProfileInfoTile extends StatelessWidget {
                         color: isDark
                             ? AppColors.darkText
                             : AppColors.lightText,
+                        height: multiLine ? 1.45 : 1.0,
                       ),
                     ),
                   ],
@@ -544,7 +670,7 @@ class _ProfileInfoTile extends StatelessWidget {
         if (!isLast)
           Divider(
             height: 1,
-            indent: 68,
+            indent: 63,
             endIndent: 0,
             color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
           ),
@@ -553,27 +679,31 @@ class _ProfileInfoTile extends StatelessWidget {
   }
 }
 
-// ─── Option Tile (tappable) ───────────────────────────────────────────────────
-class _ProfileOptionTile extends StatefulWidget {
+// ═════════════════════════════════════════════════════════════════════════════
+// Option Tile (tappable)
+// ═════════════════════════════════════════════════════════════════════════════
+class _OptionTile extends StatefulWidget {
   final IconData icon;
   final String label;
   final bool isDark;
+  final Color accent;
   final VoidCallback onTap;
   final bool isLast;
 
-  const _ProfileOptionTile({
+  const _OptionTile({
     required this.icon,
     required this.label,
     required this.isDark,
+    required this.accent,
     required this.onTap,
     this.isLast = false,
   });
 
   @override
-  State<_ProfileOptionTile> createState() => _ProfileOptionTileState();
+  State<_OptionTile> createState() => _OptionTileState();
 }
 
-class _ProfileOptionTileState extends State<_ProfileOptionTile> {
+class _OptionTileState extends State<_OptionTile> {
   bool _pressed = false;
 
   @override
@@ -586,27 +716,35 @@ class _ProfileOptionTileState extends State<_ProfileOptionTile> {
           onTapCancel: () => setState(() => _pressed = false),
           onTap: widget.onTap,
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 100),
-            color: _pressed
-                ? (widget.isDark
-                      ? AppColors.darkSurfaceAlt
-                      : AppColors.lightSurfaceAlt)
-                : Colors.transparent,
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+            duration: const Duration(milliseconds: 90),
+            decoration: BoxDecoration(
+              borderRadius: widget.isLast
+                  ? const BorderRadius.only(
+                      bottomLeft: Radius.circular(16),
+                      bottomRight: Radius.circular(16),
+                    )
+                  : BorderRadius.zero,
+              color: _pressed
+                  ? (widget.isDark
+                        ? AppColors.darkSurfaceAlt
+                        : AppColors.lightSurfaceAlt)
+                  : Colors.transparent,
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
             child: Row(
               children: [
                 Container(
-                  width: 36,
-                  height: 36,
+                  width: 34,
+                  height: 34,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(10),
-                    color: AppColors.ocean.withOpacity(
-                      widget.isDark ? 0.12 : 0.08,
+                    color: widget.accent.withOpacity(
+                      widget.isDark ? 0.12 : 0.07,
                     ),
                   ),
-                  child: Icon(widget.icon, size: 17, color: AppColors.ocean),
+                  child: Icon(widget.icon, size: 16, color: widget.accent),
                 ),
-                const SizedBox(width: 14),
+                const SizedBox(width: 13),
                 Expanded(
                   child: Text(
                     widget.label,
@@ -633,10 +771,65 @@ class _ProfileOptionTileState extends State<_ProfileOptionTile> {
         if (!widget.isLast)
           Divider(
             height: 1,
-            indent: 68,
+            indent: 63,
             color: widget.isDark ? AppColors.darkBorder : AppColors.lightBorder,
           ),
       ],
+    );
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Sign Out Button
+// ═════════════════════════════════════════════════════════════════════════════
+class _SignOutButton extends StatefulWidget {
+  final VoidCallback onTap;
+  final bool isDark;
+  const _SignOutButton({required this.onTap, required this.isDark});
+
+  @override
+  State<_SignOutButton> createState() => _SignOutButtonState();
+}
+
+class _SignOutButtonState extends State<_SignOutButton> {
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapUp: (_) => setState(() => _pressed = false),
+      onTapCancel: () => setState(() => _pressed = false),
+      onTap: widget.onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 100),
+        height: 56,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          color: _pressed
+              ? AppColors.error.withOpacity(widget.isDark ? 0.20 : 0.12)
+              : AppColors.error.withOpacity(widget.isDark ? 0.10 : 0.06),
+          border: Border.all(
+            color: AppColors.error.withOpacity(_pressed ? 0.55 : 0.28),
+            width: 1.5,
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.logout_rounded, size: 18, color: AppColors.error),
+            const SizedBox(width: 10),
+            Text(
+              'Sign Out',
+              style: GoogleFonts.spaceGrotesk(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: AppColors.error,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

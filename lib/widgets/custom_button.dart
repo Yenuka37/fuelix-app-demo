@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 
@@ -169,6 +170,8 @@ class AppTextField extends StatefulWidget {
   final FocusNode? focusNode;
   final void Function(String)? onChanged;
   final bool readOnly;
+  final int? maxLines;
+  final List<TextInputFormatter>? inputFormatters;
 
   const AppTextField({
     super.key,
@@ -184,6 +187,8 @@ class AppTextField extends StatefulWidget {
     this.focusNode,
     this.onChanged,
     this.readOnly = false,
+    this.maxLines = 1,
+    this.inputFormatters,
   });
 
   @override
@@ -195,23 +200,45 @@ class _AppTextFieldState extends State<AppTextField> {
 
   @override
   Widget build(BuildContext context) {
+    // Multi-line fields should never be obscured
+    final isMultiline = (widget.maxLines ?? 1) > 1;
+
     return TextFormField(
       controller: widget.controller,
-      obscureText: widget.obscureText ? _obscure : false,
+      obscureText: (!isMultiline && widget.obscureText) ? _obscure : false,
       keyboardType: widget.keyboardType,
       validator: widget.validator,
       textCapitalization: widget.textCapitalization,
       focusNode: widget.focusNode,
       onChanged: widget.onChanged,
       readOnly: widget.readOnly,
+      maxLines: widget.obscureText ? 1 : (widget.maxLines ?? 1),
+      minLines: 1,
+      inputFormatters: widget.inputFormatters,
       style: Theme.of(context).textTheme.bodyLarge,
       decoration: InputDecoration(
         labelText: widget.label,
         hintText: widget.hint,
-        prefixIcon: widget.prefixIcon != null
-            ? Icon(widget.prefixIcon, size: 20)
+        // Align prefix icon to top for multi-line fields
+        prefixIconConstraints: isMultiline
+            ? const BoxConstraints(minWidth: 48, minHeight: 48)
             : null,
-        suffixIcon: widget.obscureText
+        prefixIcon: widget.prefixIcon != null
+            ? Padding(
+                padding: isMultiline
+                    ? const EdgeInsets.only(bottom: 0)
+                    : EdgeInsets.zero,
+                child: Align(
+                  alignment: isMultiline
+                      ? Alignment.topCenter
+                      : Alignment.center,
+                  widthFactor: 1,
+                  heightFactor: isMultiline ? 1.6 : null,
+                  child: Icon(widget.prefixIcon, size: 20),
+                ),
+              )
+            : null,
+        suffixIcon: (!isMultiline && widget.obscureText)
             ? IconButton(
                 icon: Icon(
                   _obscure

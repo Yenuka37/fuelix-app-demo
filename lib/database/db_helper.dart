@@ -12,7 +12,7 @@ class DbHelper {
   static Database? _database;
 
   static const String _dbName = 'fuelix.db';
-  static const int _dbVersion = 1;
+  static const int _dbVersion = 3; // bumped for address columns
   static const String _usersTable = 'users';
 
   Future<Database> get database async {
@@ -23,7 +23,6 @@ class DbHelper {
   Future<Database> _initDb() async {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, _dbName);
-
     return await openDatabase(
       path,
       version: _dbVersion,
@@ -35,29 +34,63 @@ class DbHelper {
   Future<void> _onCreate(Database db, int version) async {
     await db.execute('''
       CREATE TABLE $_usersTable (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        first_name TEXT NOT NULL,
-        last_name TEXT NOT NULL,
-        nic TEXT NOT NULL UNIQUE,
-        email TEXT NOT NULL UNIQUE,
-        password TEXT NOT NULL,
-        created_at TEXT NOT NULL
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        first_name    TEXT NOT NULL,
+        last_name     TEXT NOT NULL,
+        nic           TEXT NOT NULL UNIQUE,
+        mobile        TEXT NOT NULL DEFAULT '',
+        address_line1 TEXT NOT NULL DEFAULT '',
+        address_line2 TEXT NOT NULL DEFAULT '',
+        address_line3 TEXT NOT NULL DEFAULT '',
+        district      TEXT NOT NULL DEFAULT '',
+        province      TEXT NOT NULL DEFAULT '',
+        postal_code   TEXT NOT NULL DEFAULT '',
+        email         TEXT NOT NULL UNIQUE,
+        password      TEXT NOT NULL,
+        created_at    TEXT NOT NULL
       )
     ''');
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    // Handle future migrations here
+    if (oldVersion < 2) {
+      await db.execute(
+        "ALTER TABLE $_usersTable ADD COLUMN mobile        TEXT NOT NULL DEFAULT ''",
+      );
+      await db.execute(
+        "ALTER TABLE $_usersTable ADD COLUMN address_line1 TEXT NOT NULL DEFAULT ''",
+      );
+    }
+    if (oldVersion < 3) {
+      // Rename old single-address column if it exists (best-effort)
+      try {
+        await db.execute(
+          "ALTER TABLE $_usersTable ADD COLUMN address_line2 TEXT NOT NULL DEFAULT ''",
+        );
+        await db.execute(
+          "ALTER TABLE $_usersTable ADD COLUMN address_line3 TEXT NOT NULL DEFAULT ''",
+        );
+        await db.execute(
+          "ALTER TABLE $_usersTable ADD COLUMN district      TEXT NOT NULL DEFAULT ''",
+        );
+        await db.execute(
+          "ALTER TABLE $_usersTable ADD COLUMN province      TEXT NOT NULL DEFAULT ''",
+        );
+        await db.execute(
+          "ALTER TABLE $_usersTable ADD COLUMN postal_code   TEXT NOT NULL DEFAULT ''",
+        );
+      } catch (_) {}
+    }
   }
 
-  // Hash password using SHA-256
+  // ── Helpers ────────────────────────────────────────────────────────────────
   String _hashPassword(String password) {
     final bytes = utf8.encode(password);
     final digest = sha256.convert(bytes);
     return digest.toString();
   }
 
-  // Insert new user
+  // ── CRUD ───────────────────────────────────────────────────────────────────
   Future<int> insertUser(UserModel user) async {
     final db = await database;
     final hashedUser = user.copyWith(password: _hashPassword(user.password));
@@ -67,30 +100,23 @@ class DbHelper {
         hashedUser.toMap()..remove('id'),
         conflictAlgorithm: ConflictAlgorithm.fail,
       );
-    } catch (e) {
+    } catch (_) {
       return -1;
     }
   }
 
-  // Validate login by NIC and password
   Future<UserModel?> validateLogin(String nic, String password) async {
     final db = await database;
     final hashedPassword = _hashPassword(password);
-
     final results = await db.query(
       _usersTable,
       where: 'nic = ? AND password = ?',
       whereArgs: [nic, hashedPassword],
       limit: 1,
     );
-
-    if (results.isNotEmpty) {
-      return UserModel.fromMap(results.first);
-    }
-    return null;
+    return results.isNotEmpty ? UserModel.fromMap(results.first) : null;
   }
 
-  // Check if NIC already exists
   Future<bool> nicExists(String nic) async {
     final db = await database;
     final results = await db.query(
@@ -102,7 +128,6 @@ class DbHelper {
     return results.isNotEmpty;
   }
 
-  // Check if email already exists
   Future<bool> emailExists(String email) async {
     final db = await database;
     final results = await db.query(
@@ -114,7 +139,17 @@ class DbHelper {
     return results.isNotEmpty;
   }
 
-  // Get user by NIC
+  Future<bool> mobileExists(String mobile) async {
+    final db = await database;
+    final results = await db.query(
+      _usersTable,
+      where: 'mobile = ?',
+      whereArgs: [mobile],
+      limit: 1,
+    );
+    return results.isNotEmpty;
+  }
+
   Future<UserModel?> getUserByNic(String nic) async {
     final db = await database;
     final results = await db.query(
@@ -123,13 +158,9 @@ class DbHelper {
       whereArgs: [nic],
       limit: 1,
     );
-    if (results.isNotEmpty) {
-      return UserModel.fromMap(results.first);
-    }
-    return null;
+    return results.isNotEmpty ? UserModel.fromMap(results.first) : null;
   }
 
-  // Close database
   Future<void> close() async {
     final db = _database;
     if (db != null) {
