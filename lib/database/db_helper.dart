@@ -13,7 +13,7 @@ class DbHelper {
   static Database? _database;
 
   static const String _dbName = 'fuelix.db';
-  static const int _dbVersion = 4;
+  static const int _dbVersion = 5; // bumped for QR columns
   static const String _usersTable = 'users';
   static const String _vehiclesTable = 'vehicles';
 
@@ -69,6 +69,8 @@ class DbHelper {
         fuel_type       TEXT NOT NULL,
         engine_cc       TEXT NOT NULL DEFAULT '',
         color           TEXT NOT NULL DEFAULT '',
+        fuel_pass_code  TEXT,
+        qr_generated_at TEXT,
         created_at      TEXT NOT NULL,
         FOREIGN KEY (user_id) REFERENCES $_usersTable(id) ON DELETE CASCADE
       )
@@ -105,6 +107,16 @@ class DbHelper {
     }
     if (oldVersion < 4) {
       await _createVehiclesTable(db);
+    }
+    if (oldVersion < 5) {
+      try {
+        await db.execute(
+          "ALTER TABLE $_vehiclesTable ADD COLUMN fuel_pass_code  TEXT",
+        );
+        await db.execute(
+          "ALTER TABLE $_vehiclesTable ADD COLUMN qr_generated_at TEXT",
+        );
+      } catch (_) {}
     }
   }
 
@@ -191,8 +203,6 @@ class DbHelper {
   // ══════════════════════════════════════════════════════════════════════════
   // VEHICLE CRUD
   // ══════════════════════════════════════════════════════════════════════════
-
-  /// Insert a new vehicle. Returns the new row id or -1 on failure.
   Future<int> insertVehicle(VehicleModel vehicle) async {
     final db = await database;
     try {
@@ -206,7 +216,6 @@ class DbHelper {
     }
   }
 
-  /// Return all vehicles belonging to [userId].
   Future<List<VehicleModel>> getVehiclesByUser(int userId) async {
     final db = await database;
     final results = await db.query(
@@ -218,7 +227,6 @@ class DbHelper {
     return results.map(VehicleModel.fromMap).toList();
   }
 
-  /// Update an existing vehicle record.
   Future<int> updateVehicle(VehicleModel vehicle) async {
     final db = await database;
     return await db.update(
@@ -229,7 +237,6 @@ class DbHelper {
     );
   }
 
-  /// Delete a vehicle by id.
   Future<int> deleteVehicle(int vehicleId) async {
     final db = await database;
     return await db.delete(
@@ -239,7 +246,6 @@ class DbHelper {
     );
   }
 
-  /// Check if a registration number is already registered for this user.
   Future<bool> regNoExists(String regNo, int userId, {int? excludeId}) async {
     final db = await database;
     final results = await db.query(
@@ -253,6 +259,32 @@ class DbHelper {
       limit: 1,
     );
     return results.isNotEmpty;
+  }
+
+  /// Check globally whether a fuel_pass_code is already taken (across all users).
+  Future<bool> fuelPassCodeExists(String code) async {
+    final db = await database;
+    final results = await db.query(
+      _vehiclesTable,
+      where: 'fuel_pass_code = ?',
+      whereArgs: [code],
+      limit: 1,
+    );
+    return results.isNotEmpty;
+  }
+
+  /// Permanently stamp the fuel pass code + timestamp on a vehicle.
+  /// Once set this cannot be changed.
+  Future<bool> setFuelPassCode(int vehicleId, String code) async {
+    final db = await database;
+    final now = DateTime.now().toIso8601String();
+    final rows = await db.update(
+      _vehiclesTable,
+      {'fuel_pass_code': code, 'qr_generated_at': now},
+      where: 'id = ? AND fuel_pass_code IS NULL', // guard — only if not set yet
+      whereArgs: [vehicleId],
+    );
+    return rows == 1;
   }
 
   // ── Close ──────────────────────────────────────────────────────────────────

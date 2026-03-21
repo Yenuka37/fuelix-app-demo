@@ -2,13 +2,15 @@ class VehicleModel {
   final int? id;
   final int userId;
   final String type; // Car, Motorcycle, Van, Truck, Bus, Three-Wheeler
-  final String make; // Toyota, Honda …
-  final String model; // Corolla, Civic …
+  final String make;
+  final String model;
   final String year;
-  final String registrationNo; // WP CAB-1234
-  final String fuelType; // Petrol, Diesel, Electric, Hybrid
-  final String engineCC; // 1500, 2000 …
+  final String registrationNo;
+  final String fuelType; // Petrol, Diesel, Electric, Hybrid, LPG
+  final String engineCC;
   final String color;
+  final String? fuelPassCode; // 8-char unique code — null until generated
+  final DateTime? qrGeneratedAt; // timestamp of QR generation
   final DateTime? createdAt;
 
   VehicleModel({
@@ -22,8 +24,16 @@ class VehicleModel {
     required this.fuelType,
     this.engineCC = '',
     this.color = '',
+    this.fuelPassCode,
+    this.qrGeneratedAt,
     this.createdAt,
   });
+
+  /// Whether a Fuel Pass QR has been generated for this vehicle.
+  bool get hasQr => fuelPassCode != null && fuelPassCode!.isNotEmpty;
+
+  /// Vehicle is locked (uneditable) once QR is generated.
+  bool get isLocked => hasQr;
 
   Map<String, dynamic> toMap() => {
     'id': id,
@@ -36,6 +46,8 @@ class VehicleModel {
     'fuel_type': fuelType,
     'engine_cc': engineCC,
     'color': color,
+    'fuel_pass_code': fuelPassCode,
+    'qr_generated_at': qrGeneratedAt?.toIso8601String(),
     'created_at':
         createdAt?.toIso8601String() ?? DateTime.now().toIso8601String(),
   };
@@ -51,6 +63,10 @@ class VehicleModel {
     fuelType: m['fuel_type'] as String,
     engineCC: m['engine_cc'] as String? ?? '',
     color: m['color'] as String? ?? '',
+    fuelPassCode: m['fuel_pass_code'] as String?,
+    qrGeneratedAt: m['qr_generated_at'] != null
+        ? DateTime.tryParse(m['qr_generated_at'] as String)
+        : null,
     createdAt: m['created_at'] != null
         ? DateTime.tryParse(m['created_at'] as String)
         : null,
@@ -67,6 +83,8 @@ class VehicleModel {
     String? fuelType,
     String? engineCC,
     String? color,
+    String? fuelPassCode,
+    DateTime? qrGeneratedAt,
     DateTime? createdAt,
   }) => VehicleModel(
     id: id ?? this.id,
@@ -79,6 +97,8 @@ class VehicleModel {
     fuelType: fuelType ?? this.fuelType,
     engineCC: engineCC ?? this.engineCC,
     color: color ?? this.color,
+    fuelPassCode: fuelPassCode ?? this.fuelPassCode,
+    qrGeneratedAt: qrGeneratedAt ?? this.qrGeneratedAt,
     createdAt: createdAt ?? this.createdAt,
   );
 
