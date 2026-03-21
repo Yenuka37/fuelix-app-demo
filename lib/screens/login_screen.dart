@@ -4,6 +4,8 @@ import '../theme/app_theme.dart';
 import '../database/db_helper.dart';
 import '../models/user_model.dart';
 import '../widgets/custom_button.dart';
+import '../services/tutorial_service.dart';
+import 'onboarding_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -70,7 +72,20 @@ class _LoginScreenState extends State<LoginScreen>
           isSuccess: true,
         );
         await Future.delayed(const Duration(milliseconds: 500));
-        if (mounted) {
+        if (!mounted) return;
+
+        // First-time login → show onboarding, else go directly to home
+        final onboardingSeen = await TutorialService.isSeen(
+          TutorialKey.onboarding,
+        );
+        if (!mounted) return;
+
+        if (!onboardingSeen) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => OnboardingScreen(user: user)),
+          );
+        } else {
           Navigator.pushReplacementNamed(context, '/home', arguments: user);
         }
       } else {

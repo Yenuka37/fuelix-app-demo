@@ -454,7 +454,8 @@ class _VehiclesScreenState extends State<VehiclesScreen>
                             onDelete: () => _confirmDelete(_vehicles[i]),
                             onGenerateQr: () =>
                                 _confirmGenerateQr(_vehicles[i]),
-                            onViewFuelPass: () => _showFuelPass(_vehicles[i]),
+                            onViewFuelPass: () async =>
+                                _showFuelPass(_vehicles[i]),
                           ),
                         ),
                       ),
@@ -1452,6 +1453,7 @@ class _QuotaStat extends StatelessWidget {
   );
 }
 
+// ─── Notice ───────────────────────────────────────────────────────────────────
 class _Notice extends StatelessWidget {
   final IconData icon;
   final Color color;

@@ -5,6 +5,8 @@ import '../models/user_model.dart';
 import '../models/vehicle_model.dart';
 import '../models/topup_model.dart';
 import '../database/db_helper.dart';
+import '../services/tutorial_service.dart';
+import '../widgets/tutorial_overlay.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -23,6 +25,13 @@ class _HomeScreenState extends State<HomeScreen>
   List<VehicleModel> _vehicles = [];
   WalletModel? _wallet;
   final _db = DbHelper();
+
+  // ── Tutorial keys ─────────────────────────────────────────────────────────
+  final _keyWelcome = GlobalKey();
+  final _keyVehicles = GlobalKey();
+  final _keyWallet = GlobalKey();
+  final _keyActions = GlobalKey();
+  bool _showTour = false;
 
   @override
   void initState() {
@@ -49,6 +58,7 @@ class _HomeScreenState extends State<HomeScreen>
       _user = u;
       _loadVehicles();
       _loadWallet();
+      _checkHomeTour();
     }
   }
 
@@ -56,6 +66,15 @@ class _HomeScreenState extends State<HomeScreen>
   void dispose() {
     _animController.dispose();
     super.dispose();
+  }
+
+  Future<void> _checkHomeTour() async {
+    final seen = await TutorialService.isSeen(TutorialKey.homeTour);
+    if (!seen && mounted) {
+      // Give screen time to render before showing tour
+      await Future.delayed(const Duration(milliseconds: 600));
+      if (mounted) setState(() => _showTour = true);
+    }
   }
 
   Future<void> _loadVehicles() async {
@@ -130,7 +149,7 @@ class _HomeScreenState extends State<HomeScreen>
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final user = _user;
 
-    return Scaffold(
+    final screen = Scaffold(
       body: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -160,7 +179,10 @@ class _HomeScreenState extends State<HomeScreen>
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(24, 28, 24, 0),
-                      child: _buildWelcomeCard(isDark, user),
+                      child: KeyedSubtree(
+                        key: _keyWelcome,
+                        child: _buildWelcomeCard(isDark, user),
+                      ),
                     ),
                   ),
                   // ── Stats row ─────────────────────────────────────────────
@@ -174,23 +196,32 @@ class _HomeScreenState extends State<HomeScreen>
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(24, 14, 24, 0),
-                      child: _buildWalletPreview(isDark),
+                      child: KeyedSubtree(
+                        key: _keyWallet,
+                        child: _buildWalletPreview(isDark),
+                      ),
                     ),
                   ),
                   // ── My Vehicles ───────────────────────────────────────────
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(24, 28, 24, 0),
-                      child: _buildVehiclesSection(isDark),
+                      child: KeyedSubtree(
+                        key: _keyVehicles,
+                        child: _buildVehiclesSection(isDark),
+                      ),
                     ),
                   ),
                   // ── Quick Actions ─────────────────────────────────────────
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(24, 28, 24, 14),
-                      child: Text(
-                        'Quick Actions',
-                        style: Theme.of(context).textTheme.headlineSmall,
+                      child: KeyedSubtree(
+                        key: _keyActions,
+                        child: Text(
+                          'Quick Actions',
+                          style: Theme.of(context).textTheme.headlineSmall,
+                        ),
                       ),
                     ),
                   ),
@@ -266,6 +297,59 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ),
       ),
+    );
+
+    // Wrap with spotlight tour when active
+    if (!_showTour) return screen;
+
+    return SpotlightTour(
+      steps: [
+        TourStep(
+          targetKey: _keyWelcome,
+          title: 'Your Dashboard',
+          body:
+              'This is your home screen. See your greeting, NIC, '
+              'and email at a glance.',
+          icon: Icons.dashboard_rounded,
+          gradient: [AppColors.emerald, AppColors.ocean],
+          position: TooltipPosition.below,
+        ),
+        TourStep(
+          targetKey: _keyWallet,
+          title: 'Fuelix Wallet',
+          body:
+              'Your wallet balance is shown here. '
+              'Tap to top up and manage your fuel credits.',
+          icon: Icons.account_balance_wallet_rounded,
+          gradient: [const Color(0xFF7C3AED), const Color(0xFF0A84FF)],
+          position: TooltipPosition.below,
+        ),
+        TourStep(
+          targetKey: _keyVehicles,
+          title: 'My Vehicles',
+          body:
+              'Add and manage your vehicles here. '
+              'Each vehicle gets a unique Fuel Pass QR code.',
+          icon: Icons.directions_car_rounded,
+          gradient: [AppColors.ocean, AppColors.emerald],
+          position: TooltipPosition.below,
+        ),
+        TourStep(
+          targetKey: _keyActions,
+          title: 'Quick Actions',
+          body:
+              'Log fuel, view analytics, manage trips, '
+              'and top up your wallet — all from here.',
+          icon: Icons.grid_view_rounded,
+          gradient: [AppColors.amber, AppColors.emerald],
+          position: TooltipPosition.above,
+        ),
+      ],
+      onComplete: () async {
+        await TutorialService.markSeen(TutorialKey.homeTour);
+        if (mounted) setState(() => _showTour = false);
+      },
+      child: screen,
     );
   }
 
