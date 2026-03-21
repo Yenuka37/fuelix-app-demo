@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import '../models/user_model.dart';
+import '../models/vehicle_model.dart';
+import '../database/db_helper.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -15,7 +17,10 @@ class _HomeScreenState extends State<HomeScreen>
   late AnimationController _animController;
   late Animation<double> _fadeAnim;
   late Animation<Offset> _slideAnim;
+
   UserModel? _user;
+  List<VehicleModel> _vehicles = [];
+  final _db = DbHelper();
 
   @override
   void initState() {
@@ -29,22 +34,36 @@ class _HomeScreenState extends State<HomeScreen>
       begin: const Offset(0, 0.06),
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _animController, curve: Curves.easeOut));
-
     Future.delayed(const Duration(milliseconds: 100), () {
-      _animController.forward();
+      if (mounted) _animController.forward();
     });
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _user = ModalRoute.of(context)?.settings.arguments as UserModel?;
+    final u = ModalRoute.of(context)?.settings.arguments as UserModel?;
+    if (u != null && _user?.id != u.id) {
+      _user = u;
+      _loadVehicles();
+    }
   }
 
   @override
   void dispose() {
     _animController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadVehicles() async {
+    if (_user?.id == null) return;
+    final list = await _db.getVehiclesByUser(_user!.id!);
+    if (mounted) setState(() => _vehicles = list);
+  }
+
+  void _goToVehicles() async {
+    await Navigator.pushNamed(context, '/vehicles', arguments: _user);
+    _loadVehicles(); // refresh after returning
   }
 
   void _logout() {
@@ -91,6 +110,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  // ── Build ─────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -115,28 +135,35 @@ class _HomeScreenState extends State<HomeScreen>
               child: CustomScrollView(
                 physics: const BouncingScrollPhysics(),
                 slivers: [
-                  // App Bar
+                  // ── Top bar ───────────────────────────────────────────────
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
                       child: _buildTopBar(isDark, user),
                     ),
                   ),
-                  // Welcome card
+                  // ── Welcome card ──────────────────────────────────────────
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(24, 28, 24, 0),
                       child: _buildWelcomeCard(isDark, user),
                     ),
                   ),
-                  // Stats row
+                  // ── Stats row ─────────────────────────────────────────────
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
                       child: _buildStatsRow(isDark),
                     ),
                   ),
-                  // Section title
+                  // ── My Vehicles ───────────────────────────────────────────
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(24, 28, 24, 0),
+                      child: _buildVehiclesSection(isDark),
+                    ),
+                  ),
+                  // ── Quick Actions ─────────────────────────────────────────
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(24, 28, 24, 14),
@@ -146,7 +173,6 @@ class _HomeScreenState extends State<HomeScreen>
                       ),
                     ),
                   ),
-                  // Action grid
                   SliverPadding(
                     padding: const EdgeInsets.symmetric(horizontal: 24),
                     sliver: SliverGrid(
@@ -196,7 +222,7 @@ class _HomeScreenState extends State<HomeScreen>
                       ]),
                     ),
                   ),
-                  // Recent activity
+                  // ── Recent Activity ───────────────────────────────────────
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(24, 28, 24, 14),
@@ -208,7 +234,7 @@ class _HomeScreenState extends State<HomeScreen>
                   ),
                   SliverToBoxAdapter(
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      padding: const EdgeInsets.fromLTRB(24, 0, 24, 0),
                       child: _buildEmptyActivity(isDark),
                     ),
                   ),
@@ -222,10 +248,10 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  // ── Top bar ───────────────────────────────────────────────────────────────
   Widget _buildTopBar(bool isDark, UserModel? user) {
     return Row(
       children: [
-        // Logo
         Container(
           width: 38,
           height: 38,
@@ -259,7 +285,6 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ),
         const Spacer(),
-        // Notification bell
         Container(
           width: 38,
           height: 38,
@@ -310,6 +335,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  // ── Welcome card ──────────────────────────────────────────────────────────
   Widget _buildWelcomeCard(bool isDark, UserModel? user) {
     return Container(
       padding: const EdgeInsets.all(24),
@@ -342,7 +368,6 @@ class _HomeScreenState extends State<HomeScreen>
                       style: GoogleFonts.inter(
                         fontSize: 13,
                         color: Colors.white.withOpacity(0.8),
-                        fontWeight: FontWeight.w400,
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -429,6 +454,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  // ── Stats row ─────────────────────────────────────────────────────────────
   Widget _buildStatsRow(bool isDark) {
     return Row(
       children: [
@@ -465,6 +491,79 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  // ── Vehicles section ──────────────────────────────────────────────────────
+  Widget _buildVehiclesSection(bool isDark) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Section header
+        Row(
+          children: [
+            Text(
+              'My Vehicles',
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+            const Spacer(),
+            GestureDetector(
+              onTap: _goToVehicles,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(20),
+                  color: AppColors.emerald.withOpacity(isDark ? 0.12 : 0.08),
+                  border: Border.all(color: AppColors.emerald.withOpacity(0.3)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Manage',
+                      style: GoogleFonts.spaceGrotesk(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.emerald,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    const Icon(
+                      Icons.arrow_forward_ios_rounded,
+                      size: 11,
+                      color: AppColors.emerald,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        // Content
+        if (_vehicles.isEmpty)
+          _VehicleEmptyCard(isDark: isDark, onAdd: _goToVehicles)
+        else
+          SizedBox(
+            height: 120,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              itemCount: _vehicles.length + 1, // +1 for "Add" card
+              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              itemBuilder: (_, i) {
+                if (i == _vehicles.length) {
+                  return _VehicleAddCard(isDark: isDark, onTap: _goToVehicles);
+                }
+                return _VehicleChip(vehicle: _vehicles[i], isDark: isDark);
+              },
+            ),
+          ),
+      ],
+    );
+  }
+
+  // ── Empty activity ────────────────────────────────────────────────────────
   Widget _buildEmptyActivity(bool isDark) {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 20),
@@ -500,17 +599,280 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   String _getGreeting() {
-    final hour = DateTime.now().hour;
-    if (hour < 12) return 'Good morning,';
-    if (hour < 17) return 'Good afternoon,';
+    final h = DateTime.now().hour;
+    if (h < 12) return 'Good morning,';
+    if (h < 17) return 'Good afternoon,';
     return 'Good evening,';
   }
 }
 
-// ─── Stat Card ────────────────────────────────────────────────────────────────
+// ─── Vehicle chip (horizontal list item) ─────────────────────────────────────
+class _VehicleChip extends StatelessWidget {
+  final VehicleModel vehicle;
+  final bool isDark;
+  const _VehicleChip({required this.vehicle, required this.isDark});
+
+  Color _accent(String type) {
+    switch (type) {
+      case 'Car':
+        return AppColors.ocean;
+      case 'Motorcycle':
+        return AppColors.amber;
+      case 'Van':
+        return AppColors.emerald;
+      case 'Truck':
+        return const Color(0xFFEF4444);
+      case 'Bus':
+        return const Color(0xFF7C3AED);
+      case 'Three-Wheeler':
+        return const Color(0xFFF97316);
+      default:
+        return AppColors.emerald;
+    }
+  }
+
+  IconData _icon(String type) {
+    switch (type) {
+      case 'Car':
+        return Icons.directions_car_rounded;
+      case 'Motorcycle':
+        return Icons.two_wheeler_rounded;
+      case 'Van':
+        return Icons.airport_shuttle_rounded;
+      case 'Truck':
+        return Icons.local_shipping_rounded;
+      case 'Bus':
+        return Icons.directions_bus_rounded;
+      case 'Three-Wheeler':
+        return Icons.electric_rickshaw_rounded;
+      default:
+        return Icons.directions_car_rounded;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = _accent(vehicle.type);
+    return Container(
+      width: 150,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+        border: Border.all(
+          color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: accent.withOpacity(0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(9),
+                  gradient: LinearGradient(
+                    colors: [accent, accent.withOpacity(0.7)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                ),
+                child: Icon(_icon(vehicle.type), size: 16, color: Colors.white),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(5),
+                  color: accent.withOpacity(isDark ? 0.15 : 0.10),
+                ),
+                child: Text(
+                  vehicle.fuelType,
+                  style: GoogleFonts.inter(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w600,
+                    color: accent,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                vehicle.shortDisplay,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.spaceGrotesk(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: isDark ? AppColors.darkText : AppColors.lightText,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                vehicle.registrationNo,
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  color: isDark
+                      ? AppColors.darkTextMuted
+                      : AppColors.lightTextMuted,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Add vehicle card (horizontal list) ──────────────────────────────────────
+class _VehicleAddCard extends StatelessWidget {
+  final bool isDark;
+  final VoidCallback onTap;
+  const _VehicleAddCard({required this.isDark, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 100,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+          border: Border.all(
+            color: AppColors.emerald.withOpacity(0.35),
+            width: 1.5,
+          ),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: AppColors.emerald.withOpacity(isDark ? 0.15 : 0.10),
+              ),
+              child: const Icon(
+                Icons.add_rounded,
+                size: 20,
+                color: AppColors.emerald,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Add',
+              style: GoogleFonts.spaceGrotesk(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: AppColors.emerald,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Empty vehicle card ───────────────────────────────────────────────────────
+class _VehicleEmptyCard extends StatelessWidget {
+  final bool isDark;
+  final VoidCallback onAdd;
+  const _VehicleEmptyCard({required this.isDark, required this.onAdd});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onAdd,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 20),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+          border: Border.all(
+            color: AppColors.emerald.withOpacity(0.3),
+            width: 1.5,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                gradient: LinearGradient(
+                  colors: [
+                    AppColors.emerald.withOpacity(0.15),
+                    AppColors.ocean.withOpacity(0.15),
+                  ],
+                ),
+              ),
+              child: const Icon(
+                Icons.add_rounded,
+                size: 22,
+                color: AppColors.emerald,
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Add your first vehicle',
+                    style: GoogleFonts.spaceGrotesk(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: isDark ? AppColors.darkText : AppColors.lightText,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    'Tap to add a car, bike or any vehicle',
+                    style: GoogleFonts.inter(
+                      fontSize: 12,
+                      color: isDark
+                          ? AppColors.darkTextSub
+                          : AppColors.lightTextSub,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.arrow_forward_ios_rounded,
+              size: 14,
+              color: AppColors.emerald,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Stat Card
+// ═════════════════════════════════════════════════════════════════════════════
 class _StatCard extends StatelessWidget {
-  final String label;
-  final String value;
+  final String label, value;
   final IconData icon;
   final Color color;
   final bool isDark;
@@ -563,17 +925,16 @@ class _StatCard extends StatelessWidget {
   }
 }
 
-// ─── Action Card ──────────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════════════
+// Action Card
+// ═════════════════════════════════════════════════════════════════════════════
 class _ActionCard extends StatefulWidget {
   final IconData icon;
-  final String label;
-  final String sublabel;
+  final String label, sublabel;
   final List<Color> gradient;
   final bool isDark;
   final VoidCallback onTap;
-  final Color? labelColor;
-  final Color? sublabelColor;
-  final Color? iconColor;
+  final Color? labelColor, sublabelColor, iconColor;
 
   const _ActionCard({
     required this.icon,

@@ -6,16 +6,14 @@ import 'screens/login_screen.dart';
 import 'screens/signup_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/profile_screen.dart';
+import 'screens/vehicles_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  // Lock to portrait orientation
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
   ]);
-
   runApp(const FuelixApp());
 }
 
@@ -27,7 +25,6 @@ class FuelixApp extends StatelessWidget {
     return MaterialApp(
       title: 'Fuelix',
       debugShowCheckedModeBanner: false,
-      // Automatically follow system light/dark mode
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: ThemeMode.system,
@@ -38,6 +35,7 @@ class FuelixApp extends StatelessWidget {
         '/signup': (context) => const SignupScreen(),
         '/home': (context) => const HomeScreen(),
         '/profile': (context) => const ProfileScreen(),
+        '/vehicles': (context) => const VehiclesScreen(),
       },
     );
   }
