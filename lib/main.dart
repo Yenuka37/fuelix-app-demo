@@ -7,6 +7,7 @@ import 'screens/signup_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/vehicles_screen.dart';
+import 'screens/topup_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -36,6 +37,7 @@ class FuelixApp extends StatelessWidget {
         '/home': (context) => const HomeScreen(),
         '/profile': (context) => const ProfileScreen(),
         '/vehicles': (context) => const VehiclesScreen(),
+        '/topup': (context) => const TopUpScreen(),
       },
     );
   }

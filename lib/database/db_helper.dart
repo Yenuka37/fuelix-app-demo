@@ -5,6 +5,7 @@ import 'dart:convert';
 import '../models/user_model.dart';
 import '../models/vehicle_model.dart';
 import '../models/quota_model.dart';
+import '../models/topup_model.dart';
 import '../services/quota_service.dart';
 
 class DbHelper {
@@ -15,10 +16,12 @@ class DbHelper {
   static Database? _database;
 
   static const String _dbName = 'fuelix.db';
-  static const int _dbVersion = 6;
+  static const int _dbVersion = 7;
   static const String _usersTable = 'users';
   static const String _vehiclesTable = 'vehicles';
   static const String _quotasTable = 'fuel_quotas';
+  static const String _walletTable = 'wallets';
+  static const String _topupTable = 'topup_transactions';
 
   Future<Database> get database async {
     _database ??= await _initDb();
@@ -37,7 +40,7 @@ class DbHelper {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // Schema
+  // Schema creation
   // ══════════════════════════════════════════════════════════════════════════
   Future<void> _onCreate(Database db, int version) async {
     await db.execute('''
@@ -60,6 +63,8 @@ class DbHelper {
     ''');
     await _createVehiclesTable(db);
     await _createQuotasTable(db);
+    await _createWalletTable(db);
+    await _createTopupTable(db);
   }
 
   Future<void> _createVehiclesTable(Database db) async {
@@ -93,6 +98,32 @@ class DbHelper {
         quota_litres  REAL NOT NULL,
         used_litres   REAL NOT NULL DEFAULT 0.0,
         FOREIGN KEY (vehicle_id) REFERENCES $_vehiclesTable(id) ON DELETE CASCADE
+      )
+    ''');
+  }
+
+  Future<void> _createWalletTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $_walletTable (
+        user_id    INTEGER PRIMARY KEY,
+        balance    REAL    NOT NULL DEFAULT 0.0,
+        updated_at TEXT    NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES $_usersTable(id) ON DELETE CASCADE
+      )
+    ''');
+  }
+
+  Future<void> _createTopupTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $_topupTable (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id    INTEGER NOT NULL,
+        amount     REAL    NOT NULL,
+        method     TEXT    NOT NULL,
+        status     TEXT    NOT NULL DEFAULT 'completed',
+        reference  TEXT,
+        created_at TEXT    NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES $_usersTable(id) ON DELETE CASCADE
       )
     ''');
   }
@@ -141,6 +172,10 @@ class DbHelper {
     if (oldVersion < 6) {
       await _createQuotasTable(db);
     }
+    if (oldVersion < 7) {
+      await _createWalletTable(db);
+      await _createTopupTable(db);
+    }
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -151,12 +186,19 @@ class DbHelper {
   Future<int> insertUser(UserModel user) async {
     final db = await database;
     try {
-      return await db.insert(
+      final id = await db.insert(
         _usersTable,
         user.copyWith(password: _hashPassword(user.password)).toMap()
           ..remove('id'),
         conflictAlgorithm: ConflictAlgorithm.fail,
       );
+      // Initialise wallet for new user
+      await db.insert(_walletTable, {
+        'user_id': id,
+        'balance': 0.0,
+        'updated_at': DateTime.now().toIso8601String(),
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
+      return id;
     } catch (_) {
       return -1;
     }
@@ -281,7 +323,6 @@ class DbHelper {
     )).isNotEmpty;
   }
 
-  /// Stamp QR code + create first week quota atomically.
   Future<bool> setFuelPassCode(
     int vehicleId,
     String code,
@@ -298,7 +339,6 @@ class DbHelper {
         whereArgs: [vehicleId],
       );
       if (rows == 1) {
-        // Create first week quota immediately
         final q = QuotaService.newWeekQuota(vehicleId, vehicleType);
         await txn.insert(_quotasTable, q.toMap()..remove('id'));
       }
@@ -309,18 +349,12 @@ class DbHelper {
   // ══════════════════════════════════════════════════════════════════════════
   // QUOTA CRUD
   // ══════════════════════════════════════════════════════════════════════════
-
-  /// Get the current week's quota for [vehicleId].
-  /// If the stored record belongs to a past week → create a fresh one (reset).
-  /// Balance does NOT carry over (per requirements).
   Future<FuelQuotaModel?> getCurrentWeekQuota(
     int vehicleId,
     String vehicleType,
   ) async {
     final db = await database;
     final now = DateTime.now();
-
-    // Fetch the latest record for this vehicle
     final rows = await db.query(
       _quotasTable,
       where: 'vehicle_id = ?',
@@ -328,20 +362,15 @@ class DbHelper {
       orderBy: 'week_start DESC',
       limit: 1,
     );
-
     if (rows.isNotEmpty) {
       final existing = FuelQuotaModel.fromMap(rows.first);
-      // Still in the same week → return as-is
       if (QuotaService.isCurrentWeek(existing, now)) return existing;
     }
-
-    // Either no record yet, or a past week → insert fresh quota (reset)
     final fresh = QuotaService.newWeekQuota(vehicleId, vehicleType);
     final id = await db.insert(_quotasTable, fresh.toMap()..remove('id'));
     return fresh.copyWith(id: id);
   }
 
-  /// All quota records for a vehicle (history), newest first.
   Future<List<FuelQuotaModel>> getQuotaHistory(int vehicleId) async {
     final db = await database;
     final r = await db.query(
@@ -353,8 +382,6 @@ class DbHelper {
     return r.map(FuelQuotaModel.fromMap).toList();
   }
 
-  /// Record fuel usage against the current week's quota.
-  /// Returns the updated [FuelQuotaModel] or null on failure.
   Future<FuelQuotaModel?> recordFuelUsage(
     int vehicleId,
     String vehicleType,
@@ -363,7 +390,6 @@ class DbHelper {
     final db = await database;
     final quota = await getCurrentWeekQuota(vehicleId, vehicleType);
     if (quota == null || quota.id == null) return null;
-
     final newUsed = (quota.usedLitres + litres).clamp(0.0, quota.quotaLitres);
     await db.update(
       _quotasTable,
@@ -372,6 +398,118 @@ class DbHelper {
       whereArgs: [quota.id],
     );
     return quota.copyWith(usedLitres: newUsed);
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // WALLET CRUD
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /// Get or auto-create wallet for [userId].
+  Future<WalletModel> getWallet(int userId) async {
+    final db = await database;
+    final r = await db.query(
+      _walletTable,
+      where: 'user_id = ?',
+      whereArgs: [userId],
+      limit: 1,
+    );
+    if (r.isNotEmpty) return WalletModel.fromMap(r.first);
+    // Auto-create if missing (for users created before v7)
+    final wallet = WalletModel(
+      userId: userId,
+      balance: 0.0,
+      updatedAt: DateTime.now(),
+    );
+    await db.insert(
+      _walletTable,
+      wallet.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    return wallet;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // TOPUP TRANSACTIONS
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /// Process a top-up: add to wallet balance + record transaction atomically.
+  Future<TopUpTransactionModel?> processTopUp({
+    required int userId,
+    required double amount,
+    required String method,
+    String? reference,
+  }) async {
+    final db = await database;
+    TopUpTransactionModel? result;
+
+    await db.transaction((txn) async {
+      // Ensure wallet exists
+      final walletRows = await txn.query(
+        _walletTable,
+        where: 'user_id = ?',
+        whereArgs: [userId],
+        limit: 1,
+      );
+      final currentBalance = walletRows.isNotEmpty
+          ? (walletRows.first['balance'] as num).toDouble()
+          : 0.0;
+      final newBalance = currentBalance + amount;
+      final now = DateTime.now().toIso8601String();
+
+      if (walletRows.isEmpty) {
+        await txn.insert(_walletTable, {
+          'user_id': userId,
+          'balance': newBalance,
+          'updated_at': now,
+        });
+      } else {
+        await txn.update(
+          _walletTable,
+          {'balance': newBalance, 'updated_at': now},
+          where: 'user_id = ?',
+          whereArgs: [userId],
+        );
+      }
+
+      final txn2 = TopUpTransactionModel(
+        userId: userId,
+        amount: amount,
+        method: method,
+        status: TopUpStatus.completed,
+        reference: reference ?? _generateRef(),
+        createdAt: DateTime.now(),
+      );
+      final id = await txn.insert(_topupTable, txn2.toMap()..remove('id'));
+      result = txn2..toMap(); // capture
+      result = TopUpTransactionModel(
+        id: id,
+        userId: txn2.userId,
+        amount: txn2.amount,
+        method: txn2.method,
+        status: txn2.status,
+        reference: txn2.reference,
+        createdAt: txn2.createdAt,
+      );
+    });
+
+    return result;
+  }
+
+  /// All top-up transactions for [userId], newest first.
+  Future<List<TopUpTransactionModel>> getTopUpHistory(int userId) async {
+    final db = await database;
+    final r = await db.query(
+      _topupTable,
+      where: 'user_id = ?',
+      whereArgs: [userId],
+      orderBy: 'created_at DESC',
+    );
+    return r.map(TopUpTransactionModel.fromMap).toList();
+  }
+
+  String _generateRef() {
+    final now = DateTime.now();
+    return 'FX${now.millisecondsSinceEpoch.toRadixString(36).toUpperCase()}';
   }
 
   // ── Close ──────────────────────────────────────────────────────────────────

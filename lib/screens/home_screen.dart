@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import '../models/user_model.dart';
 import '../models/vehicle_model.dart';
+import '../models/topup_model.dart';
 import '../database/db_helper.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -20,6 +21,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   UserModel? _user;
   List<VehicleModel> _vehicles = [];
+  WalletModel? _wallet;
   final _db = DbHelper();
 
   @override
@@ -46,6 +48,7 @@ class _HomeScreenState extends State<HomeScreen>
     if (u != null && _user?.id != u.id) {
       _user = u;
       _loadVehicles();
+      _loadWallet();
     }
   }
 
@@ -61,9 +64,20 @@ class _HomeScreenState extends State<HomeScreen>
     if (mounted) setState(() => _vehicles = list);
   }
 
+  Future<void> _loadWallet() async {
+    if (_user?.id == null) return;
+    final w = await _db.getWallet(_user!.id!);
+    if (mounted) setState(() => _wallet = w);
+  }
+
   void _goToVehicles() async {
     await Navigator.pushNamed(context, '/vehicles', arguments: _user);
-    _loadVehicles(); // refresh after returning
+    _loadVehicles();
+  }
+
+  void _goToTopUp() async {
+    await Navigator.pushNamed(context, '/topup', arguments: _user);
+    _loadWallet();
   }
 
   void _logout() {
@@ -156,6 +170,13 @@ class _HomeScreenState extends State<HomeScreen>
                       child: _buildStatsRow(isDark),
                     ),
                   ),
+                  // ── Wallet preview ────────────────────────────────────────
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(24, 14, 24, 0),
+                      child: _buildWalletPreview(isDark),
+                    ),
+                  ),
                   // ── My Vehicles ───────────────────────────────────────────
                   SliverToBoxAdapter(
                     child: Padding(
@@ -217,7 +238,7 @@ class _HomeScreenState extends State<HomeScreen>
                             const Color(0xFF0A84FF),
                           ],
                           isDark: isDark,
-                          onTap: () {},
+                          onTap: _goToTopUp,
                         ),
                       ]),
                     ),
@@ -488,6 +509,94 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ),
       ],
+    );
+  }
+
+  // ── Wallet preview mini-card ──────────────────────────────────────────────
+  Widget _buildWalletPreview(bool isDark) {
+    return GestureDetector(
+      onTap: _goToTopUp,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          gradient: const LinearGradient(
+            colors: [Color(0xFF7C3AED), Color(0xFF0A84FF)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF7C3AED).withOpacity(0.25),
+              blurRadius: 14,
+              offset: const Offset(0, 5),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                color: Colors.white.withOpacity(0.18),
+              ),
+              child: const Icon(
+                Icons.account_balance_wallet_rounded,
+                size: 19,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Fuelix Wallet',
+                    style: GoogleFonts.spaceGrotesk(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white.withOpacity(0.8),
+                    ),
+                  ),
+                  Text(
+                    _wallet != null ? _wallet!.formattedBalance : 'LKR 0.00',
+                    style: GoogleFonts.spaceGrotesk(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                color: Colors.white.withOpacity(0.18),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.add_rounded, size: 15, color: Colors.white),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Top Up',
+                    style: GoogleFonts.spaceGrotesk(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
