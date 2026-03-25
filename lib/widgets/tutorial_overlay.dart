@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 
-// ─── A single step in a spotlight tour ───────────────────────────────────────
+// ─── Step data ────────────────────────────────────────────────────────────────
 class TourStep {
   final GlobalKey targetKey;
   final String title;
@@ -21,10 +21,10 @@ class TourStep {
   });
 }
 
-enum TooltipPosition { above, below, left, right }
+enum TooltipPosition { above, below }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// SpotlightTour — wraps a screen, drives through steps one-by-one
+// SpotlightTour
 // ═════════════════════════════════════════════════════════════════════════════
 class SpotlightTour extends StatefulWidget {
   final List<TourStep> steps;
@@ -57,11 +57,11 @@ class _SpotlightTourState extends State<SpotlightTour>
     super.initState();
     _animCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 350),
+      duration: const Duration(milliseconds: 300),
     );
     _fadeAnim = CurvedAnimation(parent: _animCtrl, curve: Curves.easeOut);
     _scaleAnim = Tween<double>(
-      begin: 0.88,
+      begin: 0.92,
       end: 1.0,
     ).animate(CurvedAnimation(parent: _animCtrl, curve: Curves.easeOut));
     WidgetsBinding.instance.addPostFrameCallback((_) => _measure());
@@ -86,16 +86,19 @@ class _SpotlightTourState extends State<SpotlightTour>
       return;
     }
     final pos = box.localToGlobal(Offset.zero);
-    final size = box.size;
-    setState(() {
-      _targetRect = Rect.fromLTWH(pos.dx, pos.dy, size.width, size.height);
-      _visible = true;
-    });
-    _animCtrl.forward(from: 0);
+    final sz = box.size;
+    if (mounted) {
+      setState(() {
+        _targetRect = Rect.fromLTWH(pos.dx, pos.dy, sz.width, sz.height);
+        _visible = true;
+      });
+      _animCtrl.forward(from: 0);
+    }
   }
 
   Future<void> _advance() async {
     await _animCtrl.reverse();
+    if (!mounted) return;
     if (_step < widget.steps.length - 1) {
       setState(() {
         _step++;
@@ -109,7 +112,7 @@ class _SpotlightTourState extends State<SpotlightTour>
   }
 
   void _skip() {
-    setState(() => _visible = false);
+    if (mounted) setState(() => _visible = false);
     widget.onComplete();
   }
 
@@ -134,7 +137,9 @@ class _SpotlightTourState extends State<SpotlightTour>
   }
 }
 
-// ─── The actual overlay ───────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════════════
+// Overlay — dim + spotlight cutout + positioned tooltip
+// ═════════════════════════════════════════════════════════════════════════════
 class _SpotlightOverlay extends StatelessWidget {
   final TourStep step;
   final int stepIndex, totalSteps;
@@ -156,65 +161,44 @@ class _SpotlightOverlay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final size = MediaQuery.of(context).size;
+    final screenSize = MediaQuery.of(context).size;
     final isLast = stepIndex == totalSteps - 1;
 
-    // Determine tooltip Y position
-    const padding = 16.0;
-    const cardH = 210.0;
-    const arrowH = 14.0;
-    double cardTop;
-    bool arrowUp; // true = arrow points up (tooltip is below target)
+    // ── Decide whether card goes above or below target ────────────────────
+    const hPad = 20.0; // horizontal screen padding
+    const arrowH = 12.0; // arrow triangle height
+    const vGap = 8.0; // gap between arrow and target
 
-    if (step.position == TooltipPosition.above ||
-        targetRect.top - cardH - arrowH - padding < 0) {
-      // Below target
-      cardTop = targetRect.bottom + arrowH + padding;
-      arrowUp = true;
-    } else {
-      // Above target
-      cardTop = targetRect.top - cardH - arrowH - padding;
-      arrowUp = false;
-    }
+    // Space available above / below
+    final spaceBelow = screenSize.height - targetRect.bottom - arrowH - vGap;
+    final spaceAbove = targetRect.top - arrowH - vGap;
 
-    // Clamp to screen
-    cardTop = cardTop.clamp(padding, size.height - cardH - padding);
+    // Place below unless position==above AND there's enough room above
+    final bool placeBelow =
+        (step.position == TooltipPosition.above && spaceAbove > 160)
+        ? false
+        : true;
+
+    // Arrow tip X = center of target, clamped to card interior
+    final cardLeft = hPad;
+    final cardRight = screenSize.width - hPad;
+    final arrowTipX = targetRect.center.dx.clamp(cardLeft + 24, cardRight - 24);
 
     return FadeTransition(
       opacity: fadeAnim,
       child: Stack(
         children: [
-          // Dim overlay with spotlight cutout
-          CustomPaint(
-            size: size,
-            painter: _SpotlightPainter(
-              spotlight: targetRect.inflate(8),
-              color: Colors.black.withOpacity(0.72),
-            ),
-          ),
-
-          // Tooltip card
-          Positioned(
-            top: cardTop,
-            left: padding,
-            right: padding,
-            child: ScaleTransition(
-              scale: scaleAnim,
-              child: _TooltipCard(
-                step: step,
-                stepIndex: stepIndex,
-                totalSteps: totalSteps,
-                arrowUp: arrowUp,
-                targetRect: targetRect,
-                isDark: isDark,
-                isLast: isLast,
-                onNext: onNext,
-                onSkip: onSkip,
+          // ── Full-screen dim with spotlight hole ────────────────────────
+          Positioned.fill(
+            child: CustomPaint(
+              painter: _SpotlightPainter(
+                spotlight: targetRect.inflate(6),
+                dimColor: Colors.black.withOpacity(0.70),
               ),
             ),
           ),
 
-          // Pulsing ring around target
+          // ── Pulse ring around target ───────────────────────────────────
           Positioned(
             left: targetRect.left - 8,
             top: targetRect.top - 8,
@@ -222,26 +206,70 @@ class _SpotlightOverlay extends StatelessWidget {
             height: targetRect.height + 16,
             child: _PulseRing(color: step.gradient.first),
           ),
+
+          // ── Tooltip card + arrow ───────────────────────────────────────
+          Positioned(
+            left: hPad,
+            right: hPad,
+            top: placeBelow ? targetRect.bottom + arrowH + vGap : null,
+            bottom: placeBelow
+                ? null
+                : screenSize.height - targetRect.top + arrowH + vGap,
+            child: ScaleTransition(
+              scale: scaleAnim,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Arrow pointing UP (card is below target)
+                  if (placeBelow)
+                    _Arrow(
+                      up: true,
+                      tipX: arrowTipX - hPad,
+                      color: step.gradient.first,
+                    ),
+
+                  // Card
+                  _TooltipCard(
+                    step: step,
+                    stepIndex: stepIndex,
+                    totalSteps: totalSteps,
+                    isDark: isDark,
+                    isLast: isLast,
+                    onNext: onNext,
+                    onSkip: onSkip,
+                  ),
+
+                  // Arrow pointing DOWN (card is above target)
+                  if (!placeBelow)
+                    _Arrow(
+                      up: false,
+                      tipX: arrowTipX - hPad,
+                      color: step.gradient.first,
+                    ),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
 }
 
-// ─── Tooltip card ─────────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════════════
+// Tooltip card
+// ═════════════════════════════════════════════════════════════════════════════
 class _TooltipCard extends StatelessWidget {
   final TourStep step;
   final int stepIndex, totalSteps;
-  final bool arrowUp, isDark, isLast;
-  final Rect targetRect;
+  final bool isDark, isLast;
   final VoidCallback onNext, onSkip;
 
   const _TooltipCard({
     required this.step,
     required this.stepIndex,
     required this.totalSteps,
-    required this.arrowUp,
-    required this.targetRect,
     required this.isDark,
     required this.isLast,
     required this.onNext,
@@ -252,235 +280,258 @@ class _TooltipCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final bg = isDark ? const Color(0xFF1C2333) : Colors.white;
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (!arrowUp) _Arrow(up: false, color: step.gradient.first),
-        Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-            color: bg,
-            boxShadow: [
-              BoxShadow(
-                color: step.gradient.first.withOpacity(0.25),
-                blurRadius: 24,
-                offset: const Offset(0, 8),
-              ),
-            ],
-            border: Border.all(
-              color: step.gradient.first.withOpacity(0.3),
-              width: 1.5,
-            ),
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        width: double.infinity,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          color: bg,
+          border: Border.all(
+            color: step.gradient.first.withOpacity(0.35),
+            width: 1.5,
           ),
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header
-              Row(
-                children: [
-                  Container(
-                    width: 38,
-                    height: 38,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(isDark ? 0.5 : 0.18),
+              blurRadius: 28,
+              offset: const Offset(0, 8),
+            ),
+            BoxShadow(
+              color: step.gradient.first.withOpacity(0.15),
+              blurRadius: 20,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Header ───────────────────────────────────────────────────
+            Row(
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(11),
+                    gradient: LinearGradient(
+                      colors: step.gradient,
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                  ),
+                  child: Icon(step.icon, size: 18, color: Colors.white),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    step.title,
+                    style: GoogleFonts.spaceGrotesk(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: isDark ? AppColors.darkText : AppColors.lightText,
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(10),
+                    color: step.gradient.first.withOpacity(0.13),
+                  ),
+                  child: Text(
+                    '${stepIndex + 1}/$totalSteps',
+                    style: GoogleFonts.spaceGrotesk(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: step.gradient.first,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+
+            // ── Body text ─────────────────────────────────────────────────
+            Text(
+              step.body,
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                height: 1.55,
+                color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // ── Dots + buttons ────────────────────────────────────────────
+            Row(
+              children: [
+                // Progress dots
+                ...List.generate(
+                  totalSteps,
+                  (i) => AnimatedContainer(
+                    duration: const Duration(milliseconds: 250),
+                    margin: const EdgeInsets.only(right: 5),
+                    width: i == stepIndex ? 18 : 6,
+                    height: 6,
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(11),
+                      borderRadius: BorderRadius.circular(3),
+                      color: i == stepIndex
+                          ? step.gradient.first
+                          : step.gradient.first.withOpacity(0.22),
+                    ),
+                  ),
+                ),
+                const Spacer(),
+                // Skip
+                if (!isLast)
+                  GestureDetector(
+                    onTap: onSkip,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      child: Text(
+                        'Skip',
+                        style: GoogleFonts.spaceGrotesk(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: isDark
+                              ? AppColors.darkTextMuted
+                              : AppColors.lightTextMuted,
+                        ),
+                      ),
+                    ),
+                  ),
+                const SizedBox(width: 6),
+                // Next / Done
+                GestureDetector(
+                  onTap: onNext,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(10),
                       gradient: LinearGradient(
                         colors: step.gradient,
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                       ),
-                    ),
-                    child: Icon(step.icon, size: 18, color: Colors.white),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      step.title,
-                      style: GoogleFonts.spaceGrotesk(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: isDark
-                            ? AppColors.darkText
-                            : AppColors.lightText,
-                      ),
-                    ),
-                  ),
-                  // Step counter
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(12),
-                      color: step.gradient.first.withOpacity(0.12),
-                    ),
-                    child: Text(
-                      '${stepIndex + 1}/$totalSteps',
-                      style: GoogleFonts.spaceGrotesk(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: step.gradient.first,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Text(
-                step.body,
-                style: GoogleFonts.inter(
-                  fontSize: 13,
-                  height: 1.55,
-                  color: isDark
-                      ? AppColors.darkTextSub
-                      : AppColors.lightTextSub,
-                ),
-              ),
-              const SizedBox(height: 16),
-              // Dots + buttons row
-              Row(
-                children: [
-                  // Progress dots
-                  Row(
-                    children: List.generate(
-                      totalSteps,
-                      (i) => AnimatedContainer(
-                        duration: const Duration(milliseconds: 250),
-                        margin: const EdgeInsets.only(right: 5),
-                        width: i == stepIndex ? 16 : 6,
-                        height: 6,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(3),
-                          color: i == stepIndex
-                              ? step.gradient.first
-                              : step.gradient.first.withOpacity(0.25),
+                      boxShadow: [
+                        BoxShadow(
+                          color: step.gradient.first.withOpacity(0.3),
+                          blurRadius: 8,
+                          offset: const Offset(0, 3),
                         ),
-                      ),
+                      ],
                     ),
-                  ),
-                  const Spacer(),
-                  // Skip
-                  if (!isLast)
-                    GestureDetector(
-                      onTap: onSkip,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 6,
-                        ),
-                        child: Text(
-                          'Skip',
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          isLast ? 'Done' : 'Next',
                           style: GoogleFonts.spaceGrotesk(
                             fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: isDark
-                                ? AppColors.darkTextMuted
-                                : AppColors.lightTextMuted,
-                          ),
-                        ),
-                      ),
-                    ),
-                  const SizedBox(width: 8),
-                  // Next / Done
-                  GestureDetector(
-                    onTap: onNext,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 18,
-                        vertical: 9,
-                      ),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(10),
-                        gradient: LinearGradient(
-                          colors: step.gradient,
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: step.gradient.first.withOpacity(0.3),
-                            blurRadius: 10,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            isLast ? 'Done' : 'Next',
-                            style: GoogleFonts.spaceGrotesk(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.white,
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          Icon(
-                            isLast
-                                ? Icons.check_rounded
-                                : Icons.arrow_forward_rounded,
-                            size: 14,
+                            fontWeight: FontWeight.w700,
                             color: Colors.white,
                           ),
-                        ],
-                      ),
+                        ),
+                        const SizedBox(width: 5),
+                        Icon(
+                          isLast
+                              ? Icons.check_rounded
+                              : Icons.arrow_forward_rounded,
+                          size: 14,
+                          color: Colors.white,
+                        ),
+                      ],
                     ),
                   ),
-                ],
-              ),
-            ],
-          ),
+                ),
+              ],
+            ),
+          ],
         ),
-        if (arrowUp) _Arrow(up: true, color: step.gradient.first),
-      ],
+      ),
     );
   }
 }
 
-// ─── Arrow pointer ────────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════════════
+// Arrow — tip aligned to target center
+// ═════════════════════════════════════════════════════════════════════════════
 class _Arrow extends StatelessWidget {
+  /// [up] = true  → triangle points UP   (card is below target)
+  /// [up] = false → triangle points DOWN (card is above target)
   final bool up;
+
+  /// X offset of the arrow tip from the LEFT edge of the card.
+  final double tipX;
   final Color color;
-  const _Arrow({required this.up, required this.color});
+
+  const _Arrow({required this.up, required this.tipX, required this.color});
 
   @override
-  Widget build(BuildContext context) => CustomPaint(
-    size: const Size(24, 14),
-    painter: _ArrowPainter(up: up, color: color),
-  );
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      height: 12,
+      child: CustomPaint(
+        painter: _ArrowPainter(up: up, tipX: tipX, color: color),
+      ),
+    );
+  }
 }
 
 class _ArrowPainter extends CustomPainter {
   final bool up;
+  final double tipX;
   final Color color;
-  _ArrowPainter({required this.up, required this.color});
+
+  _ArrowPainter({required this.up, required this.tipX, required this.color});
 
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
       ..color = color
       ..style = PaintingStyle.fill;
+
+    const hw = 14.0; // half-width of arrow base
+    final cx = tipX.clamp(hw + 2, size.width - hw - 2);
+
     final path = Path();
     if (up) {
-      path.moveTo(size.width / 2, 0);
-      path.lineTo(0, size.height);
-      path.lineTo(size.width, size.height);
+      // Tip points up
+      path.moveTo(cx, 0);
+      path.lineTo(cx - hw, size.height);
+      path.lineTo(cx + hw, size.height);
     } else {
-      path.moveTo(0, 0);
-      path.lineTo(size.width, 0);
-      path.lineTo(size.width / 2, size.height);
+      // Tip points down
+      path.moveTo(cx, size.height);
+      path.lineTo(cx - hw, 0);
+      path.lineTo(cx + hw, 0);
     }
     path.close();
     canvas.drawPath(path, paint);
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter _) => false;
+  bool shouldRepaint(covariant _ArrowPainter old) =>
+      old.tipX != tipX || old.up != up;
 }
 
-// ─── Pulsing ring around spotlight target ─────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════════════
+// Pulsing ring
+// ═════════════════════════════════════════════════════════════════════════════
 class _PulseRing extends StatefulWidget {
   final Color color;
   const _PulseRing({required this.color});
@@ -499,14 +550,14 @@ class _PulseRingState extends State<_PulseRing>
     super.initState();
     _ctrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1200),
+      duration: const Duration(milliseconds: 1100),
     )..repeat();
     _scale = Tween<double>(
-      begin: 0.9,
-      end: 1.15,
+      begin: 0.92,
+      end: 1.14,
     ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut));
     _opacity = Tween<double>(
-      begin: 0.6,
+      begin: 0.55,
       end: 0.0,
     ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut));
   }
@@ -527,7 +578,7 @@ class _PulseRingState extends State<_PulseRing>
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: widget.color.withOpacity(_opacity.value),
-            width: 3,
+            width: 2.5,
           ),
         ),
       ),
@@ -535,21 +586,28 @@ class _PulseRingState extends State<_PulseRing>
   );
 }
 
-// ─── Spotlight CustomPainter ──────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════════════
+// Spotlight painter
+// ═════════════════════════════════════════════════════════════════════════════
 class _SpotlightPainter extends CustomPainter {
   final Rect spotlight;
-  final Color color;
-  _SpotlightPainter({required this.spotlight, required this.color});
+  final Color dimColor;
+
+  _SpotlightPainter({required this.spotlight, required this.dimColor});
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = color;
-    final full = Offset.zero & size;
-    final rrect = RRect.fromRectAndRadius(spotlight, const Radius.circular(14));
+    canvas.saveLayer(Offset.zero & size, Paint());
 
-    canvas.saveLayer(full, Paint());
-    canvas.drawRect(full, paint);
-    canvas.drawRRect(rrect, Paint()..blendMode = BlendMode.clear);
+    // Dim layer
+    canvas.drawRect(Offset.zero & size, Paint()..color = dimColor);
+
+    // Cut out spotlight
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(spotlight, const Radius.circular(14)),
+      Paint()..blendMode = BlendMode.clear,
+    );
+
     canvas.restore();
   }
 
