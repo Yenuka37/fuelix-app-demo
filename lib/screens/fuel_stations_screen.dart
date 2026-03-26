@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -35,6 +36,9 @@ const _kFuelFilters = [
   'Kerosene',
 ];
 
+// Default location (Colombo, Sri Lanka) if location services are disabled
+const LatLng _defaultLocation = LatLng(6.9271, 79.8612);
+
 // ═════════════════════════════════════════════════════════════════════════════
 // FuelStationsScreen
 // ═════════════════════════════════════════════════════════════════════════════
@@ -56,12 +60,12 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
   bool _isLoadingStations = true;
   String? _locationError;
   MapController _mapController = MapController();
-  bool _followUser = true;
   double _currentZoom = 13.0;
 
   // Stations data
   List<FuelStation> _stationsWithinRadius = [];
   List<FuelStation> _allStations = [];
+  bool _useDefaultLocation = false;
 
   // Filters
   final _searchCtrl = TextEditingController();
@@ -125,64 +129,99 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
     });
 
     try {
+      // Check if location services are enabled
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        setState(() {
+          _locationError =
+              'Location services are disabled. Please enable location services to see stations near you.';
+          _isLoadingLocation = false;
+        });
+        // Use default location to show all stations
+        _updateStationsWithLocation(_defaultLocation);
+        return;
+      }
+
       // Check location permissions
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
         if (permission == LocationPermission.denied) {
           setState(() {
-            _locationError = 'Location permission denied';
+            _locationError =
+                'Location permission denied. Please grant location permission to see stations near you.';
             _isLoadingLocation = false;
           });
+          // Use default location to show all stations
+          _updateStationsWithLocation(_defaultLocation);
           return;
         }
       }
 
       if (permission == LocationPermission.deniedForever) {
         setState(() {
-          _locationError = 'Location permission permanently denied';
+          _locationError =
+              'Location permission permanently denied. Please enable location permission in app settings.';
           _isLoadingLocation = false;
         });
+        // Use default location to show all stations
+        _updateStationsWithLocation(_defaultLocation);
         return;
       }
 
       // Get current position
-      final position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      );
+      final position =
+          await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.high,
+          ).timeout(
+            const Duration(seconds: 10),
+            onTimeout: () {
+              throw TimeoutException('Location request timed out');
+            },
+          );
 
       final currentLoc = LatLng(position.latitude, position.longitude);
-
-      // Get stations within 30km radius
-      final stations = _stationService.getStationsWithinRadius(
-        currentLoc.latitude,
-        currentLoc.longitude,
-      );
-
-      if (mounted) {
-        setState(() {
-          _currentLocation = currentLoc;
-          _stationsWithinRadius = stations;
-          _isLoadingLocation = false;
-        });
-
-        // Center map on user location
-        _mapController.move(currentLoc, _currentZoom);
-      }
+      _updateStationsWithLocation(currentLoc);
+    } on TimeoutException catch (_) {
+      setState(() {
+        _locationError = 'Location request timed out. Please try again.';
+        _isLoadingLocation = false;
+      });
+      _updateStationsWithLocation(_defaultLocation);
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _locationError = 'Failed to get location';
-          _isLoadingLocation = false;
-        });
-      }
+      print('Location error: $e');
+      setState(() {
+        _locationError =
+            'Failed to get your location. Showing all stations instead.';
+        _isLoadingLocation = false;
+      });
+      _updateStationsWithLocation(_defaultLocation);
+    }
+  }
+
+  void _updateStationsWithLocation(LatLng location) {
+    // Get stations within 30km radius
+    final stations = _stationService.getStationsWithinRadius(
+      location.latitude,
+      location.longitude,
+    );
+
+    if (mounted) {
+      setState(() {
+        _currentLocation = location;
+        _stationsWithinRadius = stations;
+        _isLoadingLocation = false;
+        _useDefaultLocation = location == _defaultLocation;
+      });
+
+      // Center map on location
+      _mapController.move(location, _currentZoom);
     }
   }
 
   void _centerOnUser() {
     if (_currentLocation != null) {
       _mapController.move(_currentLocation!, _currentZoom);
-      setState(() => _followUser = true);
     } else {
       _getCurrentLocation();
     }
@@ -273,10 +312,10 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
                 if (_showFilters) _buildFilterPanel(isDark),
                 _buildStatsBar(isDark, filtered),
                 Expanded(
-                  child: _isLoadingLocation || _isLoadingStations
-                      ? _buildLoadingState(isDark)
-                      : _locationError != null
-                      ? _buildLocationErrorState(isDark)
+                  child: _isLoadingStations
+                      ? _buildLoadingState(isDark, 'Loading stations...')
+                      : _isLoadingLocation
+                      ? _buildLoadingState(isDark, 'Getting your location...')
                       : _stationsWithinRadius.isEmpty
                       ? _buildNoStationsNearbyState(isDark)
                       : _isListView
@@ -301,7 +340,7 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
   }
 
   // ── Loading State ──────────────────────────────────────────────────────────
-  Widget _buildLoadingState(bool isDark) {
+  Widget _buildLoadingState(bool isDark, String message) {
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -309,9 +348,7 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
           const CircularProgressIndicator(color: AppColors.emerald),
           const SizedBox(height: 12),
           Text(
-            _isLoadingLocation
-                ? 'Getting your location...'
-                : 'Loading stations...',
+            message,
             style: GoogleFonts.inter(
               color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
             ),
@@ -321,52 +358,12 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
     );
   }
 
-  // ── Location Error State ───────────────────────────────────────────────────
-  Widget _buildLocationErrorState(bool isDark) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 40),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.location_off_rounded,
-              size: 64,
-              color: AppColors.error.withOpacity(0.6),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              _locationError!,
-              style: GoogleFonts.spaceGrotesk(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: isDark ? AppColors.darkText : AppColors.lightText,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Enable location services to find fuel stations within 30km of your location.',
-              style: GoogleFonts.inter(
-                fontSize: 13,
-                color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-            GradientButton(
-              label: 'Retry',
-              onPressed: _getCurrentLocation,
-              height: 44,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   // ── No Stations Nearby State ───────────────────────────────────────────────
   Widget _buildNoStationsNearbyState(bool isDark) {
+    final message = _useDefaultLocation
+        ? 'Unable to get your location. Showing all stations across Sri Lanka.\n\nUse the map to explore stations.'
+        : 'No fuel stations found within 30km of your location.\n\nTry expanding your search or check back later.';
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 40),
@@ -386,7 +383,9 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
                 ),
               ),
               child: Icon(
-                Icons.local_gas_station_outlined,
+                _useDefaultLocation
+                    ? Icons.map_outlined
+                    : Icons.local_gas_station_outlined,
                 size: 38,
                 color: isDark
                     ? AppColors.darkTextMuted
@@ -395,7 +394,9 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
             ),
             const SizedBox(height: 18),
             Text(
-              'No Stations Within 30km',
+              _useDefaultLocation
+                  ? 'Using Default Location'
+                  : 'No Stations Nearby',
               style: GoogleFonts.spaceGrotesk(
                 fontSize: 17,
                 fontWeight: FontWeight.w700,
@@ -404,20 +405,29 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
             ),
             const SizedBox(height: 6),
             Text(
-              'There are no fuel stations within 30km of your current location.',
+              message,
               textAlign: TextAlign.center,
               style: GoogleFonts.inter(
                 fontSize: 13,
+                height: 1.4,
                 color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
               ),
             ),
             const SizedBox(height: 20),
-            GradientButton(
-              label: 'Refresh',
-              onPressed: _getCurrentLocation,
-              height: 44,
-              colors: [AppColors.emerald, AppColors.ocean],
-            ),
+            if (!_useDefaultLocation)
+              GradientButton(
+                label: 'Retry',
+                onPressed: _getCurrentLocation,
+                height: 44,
+                colors: [AppColors.emerald, AppColors.ocean],
+              ),
+            const SizedBox(height: 12),
+            if (_useDefaultLocation)
+              OutlinedAppButton(
+                label: 'Switch to List View',
+                icon: Icons.list_rounded,
+                onPressed: () => setState(() => _isListView = true),
+              ),
           ],
         ),
       ),
@@ -461,14 +471,18 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
 
   // ── Map View ──────────────────────────────────────────────────────────────
   Widget _buildMapView(bool isDark, List<FuelStation> stations) {
+    if (stations.isEmpty) {
+      return _buildNoStationsNearbyState(isDark);
+    }
+
     return FlutterMap(
       mapController: _mapController,
       options: MapOptions(
-        initialCenter: _currentLocation ?? const LatLng(6.9271, 79.8612),
+        initialCenter: _currentLocation ?? _defaultLocation,
         initialZoom: _currentZoom,
         onMapEvent: (event) {
           if (event is MapEventMove) {
-            setState(() => _followUser = false);
+            // User is interacting with map
           }
         },
       ),
@@ -476,6 +490,7 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
         TileLayer(
           urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
           userAgentPackageName: 'com.fuelix.app',
+          tileProvider: NetworkTileProvider(),
         ),
         if (_currentLocation != null)
           MarkerLayer(
@@ -502,15 +517,15 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
         MarkerLayer(
           markers: stations.map((station) {
             return Marker(
-              width: 40,
-              height: 40,
+              width: 50,
+              height: 50,
               point: LatLng(station.latitude, station.longitude),
               child: GestureDetector(
                 onTap: () => _openDetail(station),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
-                  width: 40,
-                  height: 40,
+                  width: 44,
+                  height: 44,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     gradient: LinearGradient(
@@ -520,7 +535,7 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.2),
+                        color: Colors.black.withOpacity(0.3),
                         blurRadius: 8,
                         offset: const Offset(0, 2),
                       ),
@@ -529,7 +544,7 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
                   child: Center(
                     child: Icon(
                       Icons.local_gas_station_rounded,
-                      size: 18,
+                      size: 20,
                       color: Colors.white,
                     ),
                   ),
@@ -544,6 +559,11 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
 
   // ── Top bar ───────────────────────────────────────────────────────────────
   Widget _buildTopBar(bool isDark) {
+    final stationCount = _stationsWithinRadius.length;
+    final locationText = _useDefaultLocation
+        ? 'Showing all stations'
+        : '${stationCount} station${stationCount != 1 ? 's' : ''} within 30km';
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
       child: Row(
@@ -562,7 +582,7 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
                   style: Theme.of(context).textTheme.headlineMedium,
                 ),
                 Text(
-                  '${_stationsWithinRadius.length} stations within 30km',
+                  locationText,
                   style: GoogleFonts.inter(
                     fontSize: 12,
                     color: isDark
@@ -1983,6 +2003,7 @@ class _StationDetailSheet extends StatelessWidget {
                               urlTemplate:
                                   'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                               userAgentPackageName: 'com.fuelix.app',
+                              tileProvider: NetworkTileProvider(),
                             ),
                             MarkerLayer(
                               markers: [

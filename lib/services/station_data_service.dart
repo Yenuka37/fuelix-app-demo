@@ -1,13 +1,13 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
-import 'dart:io';
 import '../models/fuel_station_model.dart';
 
 class StationDataService {
   static const String _fileName = 'stations_db.json';
-  static const double MAX_DISTANCE_KM = 30.0; // 30km radius
+  static const double MAX_DISTANCE_KM = 30.0;
 
   List<FuelStation> _allStations = [];
 
@@ -66,30 +66,24 @@ class StationDataService {
 
   /// Get stations within 30km radius of user location
   List<FuelStation> getStationsWithinRadius(double userLat, double userLon) {
-    return _allStations.where((station) {
-      final distance = _calculateDistance(
-        userLat,
-        userLon,
-        station.latitude,
-        station.longitude,
-      );
-      station.distanceKm = distance;
-      return distance <= MAX_DISTANCE_KM;
-    }).toList()..sort((a, b) => a.distanceKm.compareTo(b.distanceKm));
+    return _allStations
+        .map((station) {
+          final distance = _calculateDistance(
+            userLat,
+            userLon,
+            station.latitude,
+            station.longitude,
+          );
+          return station.copyWith(distanceKm: distance);
+        })
+        .where((station) => station.distanceKm <= MAX_DISTANCE_KM)
+        .toList()
+      ..sort((a, b) => a.distanceKm.compareTo(b.distanceKm));
   }
 
   /// Get all stations (no distance filter)
   List<FuelStation> getAllStations() {
     return List.from(_allStations);
-  }
-
-  /// Update a station (for admin purposes)
-  Future<void> updateStation(FuelStation station) async {
-    final index = _allStations.indexWhere((s) => s.id == station.id);
-    if (index != -1) {
-      _allStations[index] = station;
-      await _saveToLocal();
-    }
   }
 
   /// Calculate distance using Haversine formula
