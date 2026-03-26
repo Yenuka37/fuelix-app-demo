@@ -12,6 +12,7 @@ import '../services/tutorial_service.dart';
 import '../services/quota_service.dart';
 import '../widgets/custom_button.dart';
 import '../widgets/tutorial_overlay.dart';
+import 'fuel_stations_screen.dart';
 
 // ─── Fuel grade catalogue ─────────────────────────────────────────────────────
 class FuelGrade {
@@ -159,6 +160,10 @@ class _HomeScreenState extends State<HomeScreen>
   void _goToTopUp() async {
     await Navigator.pushNamed(context, '/topup', arguments: _user);
     _loadWallet();
+  }
+
+  void _goToFuelStations() {
+    Navigator.pushNamed(context, '/fuel_stations', arguments: _user);
   }
 
   void _openFuelLogSheet() {
@@ -333,12 +338,12 @@ class _HomeScreenState extends State<HomeScreen>
                           onTap: () {},
                         ),
                         _ActionCard(
-                          icon: Icons.route_rounded,
-                          label: 'Trips',
-                          sublabel: 'Manage routes',
+                          icon: Icons.local_gas_station_outlined,
+                          label: 'Fuel Stations',
+                          sublabel: 'Find nearby',
                           gradient: [AppColors.amber, AppColors.amberDark],
                           isDark: isDark,
-                          onTap: () {},
+                          onTap: _goToFuelStations,
                         ),
                         _ActionCard(
                           icon: Icons.account_balance_wallet_outlined,
@@ -462,7 +467,7 @@ class _HomeScreenState extends State<HomeScreen>
           targetKey: _keyActions,
           title: 'Quick Actions',
           body:
-              'Log fuel, view analytics, manage trips, '
+              'Log fuel, view analytics, find fuel stations, '
               'and top up your wallet — all from here.',
           icon: Icons.grid_view_rounded,
           gradient: [AppColors.amber, AppColors.emerald],

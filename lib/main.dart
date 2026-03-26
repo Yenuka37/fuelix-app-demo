@@ -8,6 +8,7 @@ import 'screens/home_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/vehicles_screen.dart';
 import 'screens/topup_screen.dart';
+import 'screens/fuel_stations_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -38,6 +39,7 @@ class FuelixApp extends StatelessWidget {
         '/profile': (context) => const ProfileScreen(),
         '/vehicles': (context) => const VehiclesScreen(),
         '/topup': (context) => const TopUpScreen(),
+        '/fuel_stations': (context) => const FuelStationsScreen(),
       },
     );
   }
