@@ -2,272 +2,15 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_theme.dart';
 import '../models/user_model.dart';
+import '../models/fuel_station_model.dart';
+import '../services/station_data_service.dart';
 import '../widgets/custom_button.dart';
-
-// ─── Station Model ────────────────────────────────────────────────────────────
-class FuelStation {
-  final int id;
-  final String name;
-  final String brand; // CPC, IOC, Lanka IOC, Sinopec, Ceylon Petroleum
-  final String address;
-  final String district;
-  final String province;
-  final double latitude;
-  final double longitude;
-  final List<String> availableFuels; // Petrol 92, Petrol 95, Auto Diesel, etc.
-  final bool isFuelixPartner;
-  final bool is24Hours;
-  final String operatingHours; // e.g. "6:00 AM – 10:00 PM"
-  final List<String> amenities; // Air, Water, Restroom, Convenience Store
-  final double distanceKm; // mock distance
-  final bool isOpen;
-
-  const FuelStation({
-    required this.id,
-    required this.name,
-    required this.brand,
-    required this.address,
-    required this.district,
-    required this.province,
-    required this.latitude,
-    required this.longitude,
-    required this.availableFuels,
-    required this.isFuelixPartner,
-    required this.is24Hours,
-    required this.operatingHours,
-    required this.amenities,
-    required this.distanceKm,
-    required this.isOpen,
-  });
-}
-
-// ─── Mock Station Data ────────────────────────────────────────────────────────
-final List<FuelStation> _kAllStations = [
-  FuelStation(
-    id: 1,
-    name: 'CPC Colombo 3',
-    brand: 'CPC',
-    address: 'No. 45, Galle Road, Colombo 03',
-    district: 'Colombo',
-    province: 'Western',
-    latitude: 6.8947,
-    longitude: 79.8534,
-    availableFuels: [
-      'Petrol 92',
-      'Petrol 95',
-      'Auto Diesel',
-      'Super Diesel',
-      'Kerosene',
-    ],
-    isFuelixPartner: true,
-    is24Hours: true,
-    operatingHours: '24 Hours',
-    amenities: ['Air', 'Water', 'Restroom', 'Convenience Store'],
-    distanceKm: 1.2,
-    isOpen: true,
-  ),
-  FuelStation(
-    id: 2,
-    name: 'Lanka IOC Nugegoda',
-    brand: 'Lanka IOC',
-    address: 'High Level Road, Nugegoda',
-    district: 'Colombo',
-    province: 'Western',
-    latitude: 6.8713,
-    longitude: 79.8900,
-    availableFuels: ['Petrol 92', 'Petrol 95', 'Auto Diesel', 'Super Diesel'],
-    isFuelixPartner: true,
-    is24Hours: false,
-    operatingHours: '6:00 AM – 10:00 PM',
-    amenities: ['Air', 'Water', 'Restroom'],
-    distanceKm: 3.4,
-    isOpen: true,
-  ),
-  FuelStation(
-    id: 3,
-    name: 'Sinopec Dehiwala',
-    brand: 'Sinopec',
-    address: 'Galle Road, Dehiwala',
-    district: 'Colombo',
-    province: 'Western',
-    latitude: 6.8500,
-    longitude: 79.8650,
-    availableFuels: ['Petrol 92', 'Petrol 95', 'Auto Diesel'],
-    isFuelixPartner: false,
-    is24Hours: false,
-    operatingHours: '7:00 AM – 9:00 PM',
-    amenities: ['Air', 'Water'],
-    distanceKm: 4.1,
-    isOpen: true,
-  ),
-  FuelStation(
-    id: 4,
-    name: 'CPC Kandy City',
-    brand: 'CPC',
-    address: 'Dalada Veediya, Kandy',
-    district: 'Kandy',
-    province: 'Central',
-    latitude: 7.2906,
-    longitude: 80.6337,
-    availableFuels: [
-      'Petrol 92',
-      'Petrol 95',
-      'Auto Diesel',
-      'Super Diesel',
-      'Kerosene',
-    ],
-    isFuelixPartner: true,
-    is24Hours: true,
-    operatingHours: '24 Hours',
-    amenities: ['Air', 'Water', 'Restroom', 'Convenience Store'],
-    distanceKm: 115.2,
-    isOpen: true,
-  ),
-  FuelStation(
-    id: 5,
-    name: 'Lanka IOC Galle',
-    brand: 'Lanka IOC',
-    address: 'Matara Road, Galle',
-    district: 'Galle',
-    province: 'Southern',
-    latitude: 6.0535,
-    longitude: 80.2210,
-    availableFuels: ['Petrol 92', 'Petrol 95', 'Auto Diesel', 'Super Diesel'],
-    isFuelixPartner: true,
-    is24Hours: false,
-    operatingHours: '6:00 AM – 11:00 PM',
-    amenities: ['Air', 'Water', 'Restroom'],
-    distanceKm: 120.7,
-    isOpen: true,
-  ),
-  FuelStation(
-    id: 6,
-    name: 'CPC Gampaha',
-    brand: 'CPC',
-    address: 'Colombo Road, Gampaha',
-    district: 'Gampaha',
-    province: 'Western',
-    latitude: 7.0840,
-    longitude: 79.9990,
-    availableFuels: ['Petrol 92', 'Auto Diesel', 'Kerosene'],
-    isFuelixPartner: false,
-    is24Hours: false,
-    operatingHours: '6:00 AM – 9:00 PM',
-    amenities: ['Air', 'Water'],
-    distanceKm: 28.5,
-    isOpen: false,
-  ),
-  FuelStation(
-    id: 7,
-    name: 'Sinopec Kelaniya',
-    brand: 'Sinopec',
-    address: 'Kandy Road, Kelaniya',
-    district: 'Gampaha',
-    province: 'Western',
-    latitude: 7.0028,
-    longitude: 79.9198,
-    availableFuels: ['Petrol 92', 'Petrol 95', 'Auto Diesel', 'Super Diesel'],
-    isFuelixPartner: true,
-    is24Hours: false,
-    operatingHours: '5:30 AM – 10:30 PM',
-    amenities: ['Air', 'Water', 'Restroom'],
-    distanceKm: 14.8,
-    isOpen: true,
-  ),
-  FuelStation(
-    id: 8,
-    name: 'Lanka IOC Negombo',
-    brand: 'Lanka IOC',
-    address: 'Colombo Road, Negombo',
-    district: 'Gampaha',
-    province: 'Western',
-    latitude: 7.2081,
-    longitude: 79.8358,
-    availableFuels: ['Petrol 92', 'Petrol 95', 'Auto Diesel'],
-    isFuelixPartner: false,
-    is24Hours: true,
-    operatingHours: '24 Hours',
-    amenities: ['Air', 'Water', 'Convenience Store'],
-    distanceKm: 35.6,
-    isOpen: true,
-  ),
-  FuelStation(
-    id: 9,
-    name: 'CPC Matara',
-    brand: 'CPC',
-    address: 'Main Street, Matara',
-    district: 'Matara',
-    province: 'Southern',
-    latitude: 5.9549,
-    longitude: 80.5550,
-    availableFuels: [
-      'Petrol 92',
-      'Petrol 95',
-      'Auto Diesel',
-      'Super Diesel',
-      'Kerosene',
-    ],
-    isFuelixPartner: true,
-    is24Hours: false,
-    operatingHours: '6:00 AM – 10:00 PM',
-    amenities: ['Air', 'Water', 'Restroom'],
-    distanceKm: 158.3,
-    isOpen: true,
-  ),
-  FuelStation(
-    id: 10,
-    name: 'CPC Jaffna',
-    brand: 'CPC',
-    address: 'Hospital Road, Jaffna',
-    district: 'Jaffna',
-    province: 'Northern',
-    latitude: 9.6615,
-    longitude: 80.0255,
-    availableFuels: ['Petrol 92', 'Auto Diesel', 'Kerosene'],
-    isFuelixPartner: true,
-    is24Hours: false,
-    operatingHours: '7:00 AM – 8:00 PM',
-    amenities: ['Air', 'Water'],
-    distanceKm: 398.1,
-    isOpen: true,
-  ),
-  FuelStation(
-    id: 11,
-    name: 'Sinopec Ratnapura',
-    brand: 'Sinopec',
-    address: 'Main Street, Ratnapura',
-    district: 'Ratnapura',
-    province: 'Sabaragamuwa',
-    latitude: 6.6804,
-    longitude: 80.3994,
-    availableFuels: ['Petrol 92', 'Petrol 95', 'Auto Diesel'],
-    isFuelixPartner: true,
-    is24Hours: false,
-    operatingHours: '6:30 AM – 9:30 PM',
-    amenities: ['Air', 'Water', 'Restroom'],
-    distanceKm: 101.4,
-    isOpen: true,
-  ),
-  FuelStation(
-    id: 12,
-    name: 'Lanka IOC Kurunegala',
-    brand: 'Lanka IOC',
-    address: 'Colombo Road, Kurunegala',
-    district: 'Kurunegala',
-    province: 'North Western',
-    latitude: 7.4818,
-    longitude: 80.3609,
-    availableFuels: ['Petrol 92', 'Petrol 95', 'Auto Diesel', 'Super Diesel'],
-    isFuelixPartner: false,
-    is24Hours: false,
-    operatingHours: '6:00 AM – 10:00 PM',
-    amenities: ['Air', 'Water'],
-    distanceKm: 93.7,
-    isOpen: false,
-  ),
-];
 
 // ─── Filter options ───────────────────────────────────────────────────────────
 const _kBrands = ['All', 'CPC', 'Lanka IOC', 'Sinopec'];
@@ -305,8 +48,22 @@ class FuelStationsScreen extends StatefulWidget {
 class _FuelStationsScreenState extends State<FuelStationsScreen>
     with SingleTickerProviderStateMixin {
   UserModel? _user;
+  final StationDataService _stationService = StationDataService();
 
-  // ── Filters ───────────────────────────────────────────────────────────────
+  // Map state
+  LatLng? _currentLocation;
+  bool _isLoadingLocation = true;
+  bool _isLoadingStations = true;
+  String? _locationError;
+  MapController _mapController = MapController();
+  bool _followUser = true;
+  double _currentZoom = 13.0;
+
+  // Stations data
+  List<FuelStation> _stationsWithinRadius = [];
+  List<FuelStation> _allStations = [];
+
+  // Filters
   final _searchCtrl = TextEditingController();
   String _selectedBrand = 'All';
   String _selectedProvince = 'All';
@@ -314,7 +71,7 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
   bool _partnerOnly = false;
   bool _openOnly = false;
 
-  // ── View ──────────────────────────────────────────────────────────────────
+  // View state
   bool _showFilters = false;
   bool _isListView = true;
 
@@ -331,6 +88,7 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
     _fadeAnim = CurvedAnimation(parent: _animCtrl, curve: Curves.easeOut);
     _searchCtrl.addListener(() => setState(() {}));
     _animCtrl.forward();
+    _initializeData();
   }
 
   @override
@@ -344,13 +102,112 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
   void dispose() {
     _searchCtrl.dispose();
     _animCtrl.dispose();
+    _mapController.dispose();
     super.dispose();
+  }
+
+  Future<void> _initializeData() async {
+    await _loadStations();
+    await _getCurrentLocation();
+  }
+
+  Future<void> _loadStations() async {
+    setState(() => _isLoadingStations = true);
+    _allStations = await _stationService.loadStations();
+    setState(() => _isLoadingStations = false);
+  }
+
+  // ── Location handling ──────────────────────────────────────────────────────
+  Future<void> _getCurrentLocation() async {
+    setState(() {
+      _isLoadingLocation = true;
+      _locationError = null;
+    });
+
+    try {
+      // Check location permissions
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          setState(() {
+            _locationError = 'Location permission denied';
+            _isLoadingLocation = false;
+          });
+          return;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        setState(() {
+          _locationError = 'Location permission permanently denied';
+          _isLoadingLocation = false;
+        });
+        return;
+      }
+
+      // Get current position
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+
+      final currentLoc = LatLng(position.latitude, position.longitude);
+
+      // Get stations within 30km radius
+      final stations = _stationService.getStationsWithinRadius(
+        currentLoc.latitude,
+        currentLoc.longitude,
+      );
+
+      if (mounted) {
+        setState(() {
+          _currentLocation = currentLoc;
+          _stationsWithinRadius = stations;
+          _isLoadingLocation = false;
+        });
+
+        // Center map on user location
+        _mapController.move(currentLoc, _currentZoom);
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _locationError = 'Failed to get location';
+          _isLoadingLocation = false;
+        });
+      }
+    }
+  }
+
+  void _centerOnUser() {
+    if (_currentLocation != null) {
+      _mapController.move(_currentLocation!, _currentZoom);
+      setState(() => _followUser = true);
+    } else {
+      _getCurrentLocation();
+    }
+  }
+
+  Future<void> _openDirections(FuelStation station) async {
+    final url =
+        'https://www.google.com/maps/dir/?api=1&destination=${station.latitude},${station.longitude}';
+    try {
+      if (await canLaunchUrl(Uri.parse(url))) {
+        await launchUrl(Uri.parse(url));
+      } else {
+        showAppSnackbar(context, message: 'Could not open maps', isError: true);
+      }
+    } catch (e) {
+      showAppSnackbar(context, message: 'Error opening maps', isError: true);
+    }
   }
 
   // ── Filter logic ──────────────────────────────────────────────────────────
   List<FuelStation> get _filtered {
+    if (_stationsWithinRadius.isEmpty) return [];
+
     final q = _searchCtrl.text.trim().toLowerCase();
-    return _kAllStations.where((s) {
+    return _stationsWithinRadius.where((s) {
       if (q.isNotEmpty &&
           !s.name.toLowerCase().contains(q) &&
           !s.address.toLowerCase().contains(q) &&
@@ -409,29 +266,279 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
             opacity: _fadeAnim,
             child: Column(
               children: [
-                // ── Top bar ────────────────────────────────────────────
                 _buildTopBar(isDark),
-                // ── Search bar ─────────────────────────────────────────
                 _buildSearchBar(isDark),
-                // ── Filter chips row ───────────────────────────────────
+                _buildViewToggle(isDark),
                 _buildFilterChips(isDark),
-                // ── Filter panel (expandable) ──────────────────────────
                 if (_showFilters) _buildFilterPanel(isDark),
-                // ── Stats bar ──────────────────────────────────────────
                 _buildStatsBar(isDark, filtered),
-                // ── List / Grid ────────────────────────────────────────
                 Expanded(
-                  child: filtered.isEmpty
-                      ? _buildEmpty(isDark)
+                  child: _isLoadingLocation || _isLoadingStations
+                      ? _buildLoadingState(isDark)
+                      : _locationError != null
+                      ? _buildLocationErrorState(isDark)
+                      : _stationsWithinRadius.isEmpty
+                      ? _buildNoStationsNearbyState(isDark)
                       : _isListView
                       ? _buildListView(isDark, filtered)
-                      : _buildGridView(isDark, filtered),
+                      : _buildMapView(isDark, filtered),
                 ),
               ],
             ),
           ),
         ),
       ),
+      floatingActionButton: !_isListView && _currentLocation != null
+          ? FloatingActionButton(
+              onPressed: _centerOnUser,
+              backgroundColor: isDark
+                  ? AppColors.darkSurface
+                  : AppColors.lightSurface,
+              child: Icon(Icons.my_location_rounded, color: AppColors.emerald),
+            )
+          : null,
+    );
+  }
+
+  // ── Loading State ──────────────────────────────────────────────────────────
+  Widget _buildLoadingState(bool isDark) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const CircularProgressIndicator(color: AppColors.emerald),
+          const SizedBox(height: 12),
+          Text(
+            _isLoadingLocation
+                ? 'Getting your location...'
+                : 'Loading stations...',
+            style: GoogleFonts.inter(
+              color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Location Error State ───────────────────────────────────────────────────
+  Widget _buildLocationErrorState(bool isDark) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 40),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.location_off_rounded,
+              size: 64,
+              color: AppColors.error.withOpacity(0.6),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              _locationError!,
+              style: GoogleFonts.spaceGrotesk(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: isDark ? AppColors.darkText : AppColors.lightText,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Enable location services to find fuel stations within 30km of your location.',
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            GradientButton(
+              label: 'Retry',
+              onPressed: _getCurrentLocation,
+              height: 44,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── No Stations Nearby State ───────────────────────────────────────────────
+  Widget _buildNoStationsNearbyState(bool isDark) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 40),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: LinearGradient(
+                  colors: [
+                    AppColors.emerald.withOpacity(0.15),
+                    AppColors.ocean.withOpacity(0.15),
+                  ],
+                ),
+              ),
+              child: Icon(
+                Icons.local_gas_station_outlined,
+                size: 38,
+                color: isDark
+                    ? AppColors.darkTextMuted
+                    : AppColors.lightTextMuted,
+              ),
+            ),
+            const SizedBox(height: 18),
+            Text(
+              'No Stations Within 30km',
+              style: GoogleFonts.spaceGrotesk(
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+                color: isDark ? AppColors.darkText : AppColors.lightText,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'There are no fuel stations within 30km of your current location.',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
+              ),
+            ),
+            const SizedBox(height: 20),
+            GradientButton(
+              label: 'Refresh',
+              onPressed: _getCurrentLocation,
+              height: 44,
+              colors: [AppColors.emerald, AppColors.ocean],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── View Toggle ───────────────────────────────────────────────────────────
+  Widget _buildViewToggle(bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+      child: Container(
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          color: isDark ? AppColors.darkSurfaceAlt : AppColors.lightSurfaceAlt,
+          border: Border.all(
+            color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+          ),
+        ),
+        child: Row(
+          children: [
+            _ToggleButton(
+              label: 'List View',
+              icon: Icons.list_rounded,
+              isSelected: _isListView,
+              isDark: isDark,
+              onTap: () => setState(() => _isListView = true),
+            ),
+            _ToggleButton(
+              label: 'Map View',
+              icon: Icons.map_rounded,
+              isSelected: !_isListView,
+              isDark: isDark,
+              onTap: () => setState(() => _isListView = false),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Map View ──────────────────────────────────────────────────────────────
+  Widget _buildMapView(bool isDark, List<FuelStation> stations) {
+    return FlutterMap(
+      mapController: _mapController,
+      options: MapOptions(
+        initialCenter: _currentLocation ?? const LatLng(6.9271, 79.8612),
+        initialZoom: _currentZoom,
+        onMapEvent: (event) {
+          if (event is MapEventMove) {
+            setState(() => _followUser = false);
+          }
+        },
+      ),
+      children: [
+        TileLayer(
+          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          userAgentPackageName: 'com.fuelix.app',
+        ),
+        if (_currentLocation != null)
+          MarkerLayer(
+            markers: [
+              Marker(
+                width: 40,
+                height: 40,
+                point: _currentLocation!,
+                child: Container(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: AppColors.emerald.withOpacity(0.2),
+                    border: Border.all(color: AppColors.emerald, width: 3),
+                  ),
+                  child: const Icon(
+                    Icons.my_location,
+                    size: 20,
+                    color: AppColors.emerald,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        MarkerLayer(
+          markers: stations.map((station) {
+            return Marker(
+              width: 40,
+              height: 40,
+              point: LatLng(station.latitude, station.longitude),
+              child: GestureDetector(
+                onTap: () => _openDetail(station),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      colors: station.isFuelixPartner
+                          ? [AppColors.emerald, AppColors.ocean]
+                          : _brandGradient(station.brand),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.2),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Center(
+                    child: Icon(
+                      Icons.local_gas_station_rounded,
+                      size: 18,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ],
     );
   }
 
@@ -455,7 +562,7 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
                   style: Theme.of(context).textTheme.headlineMedium,
                 ),
                 Text(
-                  '${_kAllStations.length} stations across Sri Lanka',
+                  '${_stationsWithinRadius.length} stations within 30km',
                   style: GoogleFonts.inter(
                     fontSize: 12,
                     color: isDark
@@ -464,28 +571,6 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
                   ),
                 ),
               ],
-            ),
-          ),
-          // View toggle
-          GestureDetector(
-            onTap: () => setState(() => _isListView = !_isListView),
-            child: Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(11),
-                color: isDark
-                    ? AppColors.darkSurfaceAlt
-                    : AppColors.lightSurfaceAlt,
-                border: Border.all(
-                  color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-                ),
-              ),
-              child: Icon(
-                _isListView ? Icons.grid_view_rounded : Icons.list_rounded,
-                size: 18,
-                color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
-              ),
             ),
           ),
         ],
@@ -555,7 +640,6 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
             ),
           ),
           const SizedBox(width: 10),
-          // Filter toggle button
           GestureDetector(
             onTap: () => setState(() => _showFilters = !_showFilters),
             child: Container(
@@ -649,20 +733,6 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
               isDark: isDark,
               onTap: () => setState(() => _openOnly = !_openOnly),
             ),
-            const SizedBox(width: 8),
-            _QuickChip(
-              label: '24 Hours',
-              icon: Icons.nightlight_round,
-              active: false,
-              color: const Color(0xFF7C3AED),
-              isDark: isDark,
-              onTap: () {
-                setState(() {
-                  _openOnly = true;
-                  // filter applied via open now
-                });
-              },
-            ),
             if (_activeFilterCount > 0) ...[
               const SizedBox(width: 8),
               GestureDetector(
@@ -748,7 +818,6 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
               ],
             ),
             const SizedBox(height: 14),
-            // Brand
             _filterLabel('Brand', isDark),
             const SizedBox(height: 6),
             _buildHorizontalPills(
@@ -759,7 +828,6 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
               onSelect: (v) => setState(() => _selectedBrand = v),
             ),
             const SizedBox(height: 14),
-            // Province
             _filterLabel('Province', isDark),
             const SizedBox(height: 6),
             _buildHorizontalPills(
@@ -770,7 +838,6 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
               onSelect: (v) => setState(() => _selectedProvince = v),
             ),
             const SizedBox(height: 14),
-            // Fuel type
             _filterLabel('Fuel Type', isDark),
             const SizedBox(height: 6),
             _buildHorizontalPills(
@@ -912,112 +979,17 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
     );
   }
 
-  // ── Grid view ─────────────────────────────────────────────────────────────
-  Widget _buildGridView(bool isDark, List<FuelStation> stations) {
-    return GridView.builder(
-      physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-        childAspectRatio: 0.82,
-      ),
-      itemCount: stations.length,
-      itemBuilder: (_, i) => _StationGridCard(
-        station: stations[i],
-        isDark: isDark,
-        onTap: () => _openDetail(stations[i]),
-      ),
-    );
-  }
-
-  // ── Empty state ───────────────────────────────────────────────────────────
-  Widget _buildEmpty(bool isDark) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 40),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 80,
-              height: 80,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: LinearGradient(
-                  colors: [
-                    AppColors.emerald.withOpacity(0.15),
-                    AppColors.ocean.withOpacity(0.15),
-                  ],
-                ),
-              ),
-              child: Icon(
-                Icons.local_gas_station_outlined,
-                size: 38,
-                color: isDark
-                    ? AppColors.darkTextMuted
-                    : AppColors.lightTextMuted,
-              ),
-            ),
-            const SizedBox(height: 18),
-            Text(
-              'No stations found',
-              style: GoogleFonts.spaceGrotesk(
-                fontSize: 17,
-                fontWeight: FontWeight.w700,
-                color: isDark ? AppColors.darkText : AppColors.lightText,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'Try adjusting your search or filters.',
-              textAlign: TextAlign.center,
-              style: GoogleFonts.inter(
-                fontSize: 13,
-                color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
-              ),
-            ),
-            const SizedBox(height: 20),
-            GestureDetector(
-              onTap: () {
-                _searchCtrl.clear();
-                _clearFilters();
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 10,
-                ),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(20),
-                  gradient: const LinearGradient(
-                    colors: [AppColors.emerald, AppColors.ocean],
-                  ),
-                ),
-                child: Text(
-                  'Clear Filters',
-                  style: GoogleFonts.spaceGrotesk(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   // ── Detail sheet ──────────────────────────────────────────────────────────
   void _openDetail(FuelStation station) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _StationDetailSheet(station: station),
+      builder: (_) => _StationDetailSheet(
+        station: station,
+        userLocation: _currentLocation,
+        onDirections: () => _openDirections(station),
+      ),
     );
   }
 
@@ -1037,6 +1009,71 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
       color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
     ),
   );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Toggle Button
+// ═════════════════════════════════════════════════════════════════════════════
+class _ToggleButton extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final bool isSelected;
+  final bool isDark;
+  final VoidCallback onTap;
+
+  const _ToggleButton({
+    required this.label,
+    required this.icon,
+    required this.isSelected,
+    required this.isDark,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            gradient: isSelected
+                ? const LinearGradient(
+                    colors: [AppColors.emerald, AppColors.ocean],
+                  )
+                : null,
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 16,
+                color: isSelected
+                    ? Colors.white
+                    : (isDark ? AppColors.darkTextSub : AppColors.lightTextSub),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: GoogleFonts.spaceGrotesk(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: isSelected
+                      ? Colors.white
+                      : (isDark
+                            ? AppColors.darkTextSub
+                            : AppColors.lightTextSub),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1107,7 +1144,7 @@ class _QuickChip extends StatelessWidget {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// Brand color/icon helpers
+// Brand helpers
 // ═════════════════════════════════════════════════════════════════════════════
 Color _brandColor(String brand) {
   switch (brand) {
@@ -1119,6 +1156,19 @@ Color _brandColor(String brand) {
       return const Color(0xFFEF4444);
     default:
       return AppColors.amber;
+  }
+}
+
+List<Color> _brandGradient(String brand) {
+  switch (brand) {
+    case 'CPC':
+      return [AppColors.ocean, AppColors.oceanDark];
+    case 'Lanka IOC':
+      return [AppColors.emerald, AppColors.emeraldDark];
+    case 'Sinopec':
+      return [const Color(0xFFEF4444), const Color(0xFFDC2626)];
+    default:
+      return [AppColors.amber, AppColors.amberDark];
   }
 }
 
@@ -1186,13 +1236,11 @@ class _StationListCard extends StatelessWidget {
         ),
         child: Column(
           children: [
-            // ── Header ────────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 14, 12, 10),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Brand icon
                   Container(
                     width: 46,
                     height: 46,
@@ -1237,7 +1285,6 @@ class _StationListCard extends StatelessWidget {
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                            // Open/closed badge
                             Container(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 7,
@@ -1335,17 +1382,14 @@ class _StationListCard extends StatelessWidget {
                 ],
               ),
             ),
-            // ── Divider ───────────────────────────────────────────────
             Divider(
               height: 1,
               color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
             ),
-            // ── Footer ────────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
               child: Row(
                 children: [
-                  // Distance
                   Icon(
                     Icons.near_me_rounded,
                     size: 13,
@@ -1365,7 +1409,6 @@ class _StationListCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 12),
-                  // Hours
                   Icon(
                     station.is24Hours
                         ? Icons.nightlight_round
@@ -1386,7 +1429,6 @@ class _StationListCard extends StatelessWidget {
                     ),
                   ),
                   const Spacer(),
-                  // Fuel grade chips (first 2)
                   ...station.availableFuels
                       .take(2)
                       .map(
@@ -1450,175 +1492,18 @@ class _StationListCard extends StatelessWidget {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// Station Grid Card
-// ═════════════════════════════════════════════════════════════════════════════
-class _StationGridCard extends StatelessWidget {
-  final FuelStation station;
-  final bool isDark;
-  final VoidCallback onTap;
-
-  const _StationGridCard({
-    required this.station,
-    required this.isDark,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final accent = _brandColor(station.brand);
-
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-          border: Border.all(
-            color: station.isFuelixPartner
-                ? AppColors.emerald.withOpacity(0.3)
-                : (isDark ? AppColors.darkBorder : AppColors.lightBorder),
-            width: station.isFuelixPartner ? 1.5 : 1,
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(10),
-                    gradient: LinearGradient(
-                      colors: [accent, accent.withOpacity(0.7)],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                  ),
-                  child: const Icon(
-                    Icons.local_gas_station_rounded,
-                    size: 18,
-                    color: Colors.white,
-                  ),
-                ),
-                const Spacer(),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
-                    vertical: 3,
-                  ),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(6),
-                    color:
-                        (station.isOpen ? AppColors.emerald : AppColors.error)
-                            .withOpacity(isDark ? 0.15 : 0.08),
-                  ),
-                  child: Text(
-                    station.isOpen ? 'Open' : 'Closed',
-                    style: GoogleFonts.spaceGrotesk(
-                      fontSize: 9,
-                      fontWeight: FontWeight.w700,
-                      color: station.isOpen
-                          ? AppColors.emerald
-                          : AppColors.error,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Text(
-              station.name,
-              style: GoogleFonts.spaceGrotesk(
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                color: isDark ? AppColors.darkText : AppColors.lightText,
-                height: 1.3,
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-            const SizedBox(height: 4),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(5),
-                color: accent.withOpacity(isDark ? 0.15 : 0.08),
-              ),
-              child: Text(
-                station.brand,
-                style: GoogleFonts.spaceGrotesk(
-                  fontSize: 9,
-                  fontWeight: FontWeight.w700,
-                  color: accent,
-                ),
-              ),
-            ),
-            const Spacer(),
-            if (station.isFuelixPartner)
-              Row(
-                children: [
-                  const Icon(
-                    Icons.verified_rounded,
-                    size: 11,
-                    color: AppColors.emerald,
-                  ),
-                  const SizedBox(width: 3),
-                  Text(
-                    'Partner',
-                    style: GoogleFonts.inter(
-                      fontSize: 10,
-                      color: AppColors.emerald,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                const Icon(
-                  Icons.near_me_rounded,
-                  size: 11,
-                  color: AppColors.ocean,
-                ),
-                const SizedBox(width: 3),
-                Text(
-                  '${station.distanceKm.toStringAsFixed(1)} km',
-                  style: GoogleFonts.spaceGrotesk(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.ocean,
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  station.district,
-                  style: GoogleFonts.inter(
-                    fontSize: 10,
-                    color: isDark
-                        ? AppColors.darkTextMuted
-                        : AppColors.lightTextMuted,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
 // Station Detail Bottom Sheet
 // ═════════════════════════════════════════════════════════════════════════════
 class _StationDetailSheet extends StatelessWidget {
   final FuelStation station;
+  final LatLng? userLocation;
+  final VoidCallback onDirections;
 
-  const _StationDetailSheet({required this.station});
+  const _StationDetailSheet({
+    required this.station,
+    this.userLocation,
+    required this.onDirections,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1635,7 +1520,6 @@ class _StationDetailSheet extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Handle
             Center(
               child: Container(
                 width: 40,
@@ -1716,7 +1600,6 @@ class _StationDetailSheet extends StatelessWidget {
                             ],
                           ),
                         ),
-                        // Open/Closed + Fuelix
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
@@ -1793,7 +1676,6 @@ class _StationDetailSheet extends StatelessWidget {
                     const SizedBox(height: 18),
                     Container(height: 1, color: Colors.white.withOpacity(0.2)),
                     const SizedBox(height: 14),
-                    // Address & distance
                     Row(
                       children: [
                         const Icon(
@@ -2039,43 +1921,126 @@ class _StationDetailSheet extends StatelessWidget {
             ),
             const SizedBox(height: 14),
 
-            // ── Location info ────────────────────────────────────────
+            // ── Location info with map preview ────────────────────────
             _DetailSection(
               title: 'LOCATION',
               accentColor: const Color(0xFF7C3AED),
               isDark: isDark,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-                child: Column(
-                  children: [
-                    _locationRow(
-                      Icons.place_outlined,
-                      'Address',
-                      station.address,
-                      isDark,
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                    child: Column(
+                      children: [
+                        _locationRow(
+                          Icons.place_outlined,
+                          'Address',
+                          station.address,
+                          isDark,
+                        ),
+                        const SizedBox(height: 10),
+                        _locationRow(
+                          Icons.location_city_outlined,
+                          'District',
+                          station.district,
+                          isDark,
+                        ),
+                        const SizedBox(height: 10),
+                        _locationRow(
+                          Icons.map_outlined,
+                          'Province',
+                          station.province,
+                          isDark,
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 10),
-                    _locationRow(
-                      Icons.location_city_outlined,
-                      'District',
-                      station.district,
-                      isDark,
+                  ),
+                  const SizedBox(height: 12),
+                  Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Container(
+                      height: 160,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isDark
+                              ? AppColors.darkBorder
+                              : AppColors.lightBorder,
+                        ),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: FlutterMap(
+                          options: MapOptions(
+                            center: LatLng(station.latitude, station.longitude),
+                            zoom: 15,
+                            interactiveFlags:
+                                InteractiveFlag.pinchZoom |
+                                InteractiveFlag.drag,
+                          ),
+                          children: [
+                            TileLayer(
+                              urlTemplate:
+                                  'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                              userAgentPackageName: 'com.fuelix.app',
+                            ),
+                            MarkerLayer(
+                              markers: [
+                                Marker(
+                                  width: 40,
+                                  height: 40,
+                                  point: LatLng(
+                                    station.latitude,
+                                    station.longitude,
+                                  ),
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      gradient: LinearGradient(
+                                        colors: [
+                                          accent,
+                                          accent.withOpacity(0.7),
+                                        ],
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: accent.withOpacity(0.3),
+                                          blurRadius: 8,
+                                        ),
+                                      ],
+                                    ),
+                                    child: const Icon(
+                                      Icons.local_gas_station_rounded,
+                                      size: 20,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
-                    const SizedBox(height: 10),
-                    _locationRow(
-                      Icons.map_outlined,
-                      'Province',
-                      station.province,
-                      isDark,
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
+            const SizedBox(height: 14),
+
+            // ── Get Directions Button ───────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: GradientButton(
+                label: 'Get Directions',
+                onPressed: onDirections,
+                colors: [const Color(0xFF7C3AED), AppColors.ocean],
+              ),
+            ),
+            const SizedBox(height: 12),
 
             // ── Fuelix partner notice ────────────────────────────────
             if (station.isFuelixPartner) ...[
-              const SizedBox(height: 14),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 24),
                 child: Container(
