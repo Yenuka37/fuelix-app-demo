@@ -5,12 +5,51 @@ import '../theme/app_theme.dart';
 import '../models/user_model.dart';
 import '../models/vehicle_model.dart';
 import '../models/topup_model.dart';
+import '../models/quota_model.dart';
 import '../models/fuel_log_model.dart';
 import '../database/db_helper.dart';
 import '../services/tutorial_service.dart';
+import '../services/quota_service.dart';
 import '../widgets/custom_button.dart';
 import '../widgets/tutorial_overlay.dart';
 
+// ─── Fuel grade catalogue ─────────────────────────────────────────────────────
+class FuelGrade {
+  final String name;
+  final double pricePerLitre;
+  const FuelGrade(this.name, this.pricePerLitre);
+}
+
+class FuelCatalogue {
+  static const List<FuelGrade> petrolGrades = [
+    FuelGrade('Petrol 92', 317),
+    FuelGrade('Petrol 95', 365),
+  ];
+
+  static const List<FuelGrade> dieselGrades = [
+    FuelGrade('Auto Diesel', 303),
+    FuelGrade('Super Diesel', 353),
+  ];
+
+  static const List<FuelGrade> keroseneGrades = [FuelGrade('Kerosene', 195)];
+
+  /// Returns applicable grades for a vehicle's fuel type.
+  static List<FuelGrade> gradesFor(String fuelType) {
+    final f = fuelType.toLowerCase();
+    final List<FuelGrade> result = [];
+
+    if (f == 'petrol' || f == 'hybrid') result.addAll(petrolGrades);
+    if (f == 'diesel' || f == 'hybrid') result.addAll(dieselGrades);
+    if (f == 'kerosene') result.addAll(keroseneGrades);
+
+    // Electric / LPG / unknown → return empty so sheet disables logging
+    return result;
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// HomeScreen
+// ═════════════════════════════════════════════════════════════════════════════
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -31,11 +70,11 @@ class _HomeScreenState extends State<HomeScreen>
   Map<String, double> _stats = {
     'total_logs': 0,
     'total_litres': 0,
-    'total_km': 0,
+    'total_spent': 0,
   };
   final _db = DbHelper();
 
-  // ── Tutorial keys ─────────────────────────────────────────────────────────
+  // Tutorial keys
   final _keyWelcome = GlobalKey();
   final _keyVehicles = GlobalKey();
   final _keyWallet = GlobalKey();
@@ -138,8 +177,9 @@ class _HomeScreenState extends State<HomeScreen>
       builder: (_) => _FuelLogSheet(
         user: _user!,
         vehicles: _vehicles,
+        walletBalance: _wallet?.balance ?? 0.0,
         onSaved: () {
-          _loadFuelData();
+          _loadAll();
         },
       ),
     );
@@ -214,14 +254,12 @@ class _HomeScreenState extends State<HomeScreen>
               child: CustomScrollView(
                 physics: const BouncingScrollPhysics(),
                 slivers: [
-                  // ── Top bar ───────────────────────────────────────────────
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
                       child: _buildTopBar(isDark, user),
                     ),
                   ),
-                  // ── Welcome card ──────────────────────────────────────────
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(24, 28, 24, 0),
@@ -231,14 +269,12 @@ class _HomeScreenState extends State<HomeScreen>
                       ),
                     ),
                   ),
-                  // ── Stats row ─────────────────────────────────────────────
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
                       child: _buildStatsRow(isDark),
                     ),
                   ),
-                  // ── Wallet preview ────────────────────────────────────────
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(24, 14, 24, 0),
@@ -248,7 +284,6 @@ class _HomeScreenState extends State<HomeScreen>
                       ),
                     ),
                   ),
-                  // ── My Vehicles ───────────────────────────────────────────
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(24, 28, 24, 0),
@@ -258,7 +293,6 @@ class _HomeScreenState extends State<HomeScreen>
                       ),
                     ),
                   ),
-                  // ── Quick Actions ─────────────────────────────────────────
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(24, 28, 24, 14),
@@ -320,7 +354,7 @@ class _HomeScreenState extends State<HomeScreen>
                       ]),
                     ),
                   ),
-                  // ── Recent Activity ───────────────────────────────────────
+                  // Recent Fuel Logs
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(24, 28, 24, 14),
@@ -650,9 +684,9 @@ class _HomeScreenState extends State<HomeScreen>
 
   // ── Stats row ─────────────────────────────────────────────────────────────
   Widget _buildStatsRow(bool isDark) {
-    final totalLogs = _stats['total_logs']?.toInt() ?? 0;
+    final totalLogs = (_stats['total_logs'] ?? 0).toInt();
     final totalLitres = _stats['total_litres'] ?? 0.0;
-    final totalKm = _stats['total_km'] ?? 0.0;
+    final totalSpent = _stats['total_spent'] ?? 0.0;
 
     return Row(
       children: [
@@ -678,9 +712,9 @@ class _HomeScreenState extends State<HomeScreen>
         const SizedBox(width: 12),
         Expanded(
           child: _StatCard(
-            label: 'Total Km',
-            value: '${totalKm.toStringAsFixed(0)} km',
-            icon: Icons.speed_rounded,
+            label: 'Total Spent',
+            value: 'Rs. ${totalSpent.toStringAsFixed(0)}',
+            icon: Icons.payments_outlined,
             color: AppColors.amber,
             isDark: isDark,
           ),
@@ -689,7 +723,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── Wallet preview mini-card ──────────────────────────────────────────────
+  // ── Wallet preview ────────────────────────────────────────────────────────
   Widget _buildWalletPreview(bool isDark) {
     return GestureDetector(
       onTap: _goToTopUp,
@@ -847,7 +881,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── Recent Fuel Logs ──────────────────────────────────────────────────────
+  // ── Recent Fuel Logs list ─────────────────────────────────────────────────
   Widget _buildRecentLogs(bool isDark) {
     return Column(
       children: _recentLogs.map((log) {
@@ -973,22 +1007,18 @@ class _FuelLogTile extends StatelessWidget {
     required this.onDelete,
   });
 
-  Color _fuelColor(String type) {
-    switch (type) {
-      case 'Diesel':
-        return AppColors.amber;
-      case 'Electric':
-        return AppColors.emerald;
-      case 'LPG':
-        return const Color(0xFFF97316);
-      default:
-        return AppColors.ocean;
-    }
+  Color _gradeColor(String grade) {
+    if (grade.contains('95')) return const Color(0xFF7C3AED);
+    if (grade.contains('92')) return AppColors.ocean;
+    if (grade.contains('Super')) return AppColors.amber;
+    if (grade.contains('Auto')) return const Color(0xFFF97316);
+    if (grade.contains('Kerosene')) return const Color(0xFF6B7280);
+    return AppColors.emerald;
   }
 
   @override
   Widget build(BuildContext context) {
-    final accent = _fuelColor(log.fuelType);
+    final accent = _gradeColor(log.fuelGrade);
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
@@ -1105,7 +1135,7 @@ class _FuelLogTile extends StatelessWidget {
                             color: accent.withOpacity(isDark ? 0.15 : 0.10),
                           ),
                           child: Text(
-                            log.fuelType,
+                            log.fuelGrade,
                             style: GoogleFonts.inter(
                               fontSize: 10,
                               fontWeight: FontWeight.w600,
@@ -1130,7 +1160,7 @@ class _FuelLogTile extends StatelessWidget {
                         ),
                         Text(
                           log.totalCost > 0
-                              ? 'LKR ${log.totalCost.toStringAsFixed(0)}'
+                              ? 'Rs. ${log.totalCost.toStringAsFixed(0)}'
                               : '',
                           style: GoogleFonts.inter(
                             fontSize: 12,
@@ -1143,8 +1173,7 @@ class _FuelLogTile extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '${log.formattedDate} · ${log.formattedTime}'
-                      '${log.odometerKm > 0 ? ' · ${log.odometerKm.toStringAsFixed(0)} km' : ''}',
+                      '${log.formattedDate} · ${log.formattedTime}',
                       style: GoogleFonts.inter(
                         fontSize: 11,
                         color: isDark
@@ -1169,11 +1198,13 @@ class _FuelLogTile extends StatelessWidget {
 class _FuelLogSheet extends StatefulWidget {
   final UserModel user;
   final List<VehicleModel> vehicles;
+  final double walletBalance;
   final VoidCallback onSaved;
 
   const _FuelLogSheet({
     required this.user,
     required this.vehicles,
+    required this.walletBalance,
     required this.onSaved,
   });
 
@@ -1186,76 +1217,119 @@ class _FuelLogSheetState extends State<_FuelLogSheet> {
   final _db = DbHelper();
 
   late VehicleModel _selectedVehicle;
+  FuelGrade? _selectedGrade;
+  List<FuelGrade> _availableGrades = [];
+
   final _litresCtrl = TextEditingController();
-  final _odometerCtrl = TextEditingController();
-  final _priceCtrl = TextEditingController();
   final _stationCtrl = TextEditingController();
-  final _notesCtrl = TextEditingController();
 
   bool _isSaving = false;
-  double _totalCost = 0.0;
+
+  // Limits loaded from DB
+  double _quotaRemaining = 0;
+  double _walletBalance = 0;
+  bool _limitsLoaded = false;
+
+  // Max litres the user can enter (min of quota and wallet-based limit)
+  double get _maxLitres {
+    if (_selectedGrade == null) return _quotaRemaining;
+    final walletLitres = _walletBalance / _selectedGrade!.pricePerLitre;
+    return (_quotaRemaining < walletLitres ? _quotaRemaining : walletLitres);
+  }
+
+  double get _totalCost {
+    final litres = double.tryParse(_litresCtrl.text) ?? 0;
+    return litres * (_selectedGrade?.pricePerLitre ?? 0);
+  }
 
   @override
   void initState() {
     super.initState();
     _selectedVehicle = widget.vehicles.first;
-    _litresCtrl.addListener(_recalcCost);
-    _priceCtrl.addListener(_recalcCost);
+    _walletBalance = widget.walletBalance;
+    _litresCtrl.addListener(() => setState(() {}));
+    _refreshGradesAndLimits();
   }
 
   @override
   void dispose() {
-    _litresCtrl.removeListener(_recalcCost);
-    _priceCtrl.removeListener(_recalcCost);
     _litresCtrl.dispose();
-    _odometerCtrl.dispose();
-    _priceCtrl.dispose();
     _stationCtrl.dispose();
-    _notesCtrl.dispose();
     super.dispose();
   }
 
-  void _recalcCost() {
-    final litres = double.tryParse(_litresCtrl.text) ?? 0;
-    final price = double.tryParse(_priceCtrl.text) ?? 0;
-    setState(() => _totalCost = litres * price);
+  Future<void> _refreshGradesAndLimits() async {
+    setState(() => _limitsLoaded = false);
+
+    final grades = FuelCatalogue.gradesFor(_selectedVehicle.fuelType);
+    final quota = await _db.getCurrentWeekQuota(
+      _selectedVehicle.id!,
+      _selectedVehicle.type,
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _availableGrades = grades;
+      _selectedGrade = grades.isNotEmpty ? grades.first : null;
+      _quotaRemaining = quota?.remainingLitres ?? 0.0;
+      _limitsLoaded = true;
+      _litresCtrl.clear();
+    });
   }
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
+    if (_selectedGrade == null) return;
+
     setState(() => _isSaving = true);
+
+    final litres = double.parse(_litresCtrl.text.trim());
+    final cost = litres * _selectedGrade!.pricePerLitre;
 
     final log = FuelLogModel(
       userId: widget.user.id!,
       vehicleId: _selectedVehicle.id!,
-      litres: double.parse(_litresCtrl.text),
-      odometerKm: double.tryParse(_odometerCtrl.text) ?? 0.0,
+      litres: litres,
       fuelType: _selectedVehicle.fuelType,
-      pricePerLitre: double.tryParse(_priceCtrl.text) ?? 0.0,
-      totalCost: _totalCost,
+      fuelGrade: _selectedGrade!.name,
+      pricePerLitre: _selectedGrade!.pricePerLitre,
+      totalCost: cost,
       stationName: _stationCtrl.text.trim(),
-      notes: _notesCtrl.text.trim(),
       loggedAt: DateTime.now(),
     );
 
-    final id = await _db.insertFuelLog(log);
-    if (mounted) {
-      setState(() => _isSaving = false);
-      if (id > 0) {
-        widget.onSaved();
-        Navigator.pop(context);
-        showAppSnackbar(
-          context,
-          message: 'Fuel log saved successfully!',
-          isSuccess: true,
-        );
-      } else {
-        showAppSnackbar(
-          context,
-          message: 'Failed to save log. Please try again.',
-          isError: true,
-        );
-      }
+    final result = await _db.saveFuelLog(log, _selectedVehicle.type);
+
+    if (!mounted) return;
+    setState(() => _isSaving = false);
+
+    if (result > 0) {
+      widget.onSaved();
+      Navigator.pop(context);
+      showAppSnackbar(
+        context,
+        message: 'Fuel log saved successfully!',
+        isSuccess: true,
+      );
+    } else if (result == -1) {
+      showAppSnackbar(
+        context,
+        message:
+            'Exceeds your weekly fuel quota. Max: ${_quotaRemaining.toStringAsFixed(1)} L',
+        isError: true,
+      );
+    } else if (result == -2) {
+      showAppSnackbar(
+        context,
+        message: 'Insufficient wallet balance. Top up to continue.',
+        isError: true,
+      );
+    } else {
+      showAppSnackbar(
+        context,
+        message: 'Failed to save log. Please try again.',
+        isError: true,
+      );
     }
   }
 
@@ -1264,7 +1338,7 @@ class _FuelLogSheetState extends State<_FuelLogSheet> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return DraggableScrollableSheet(
-      initialChildSize: 0.9,
+      initialChildSize: 0.88,
       minChildSize: 0.5,
       maxChildSize: 0.95,
       builder: (_, scrollCtrl) {
@@ -1352,253 +1426,84 @@ class _FuelLogSheetState extends State<_FuelLogSheet> {
                 color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
                 height: 1,
               ),
-              // Form
               Expanded(
                 child: SingleChildScrollView(
                   controller: scrollCtrl,
-                  padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+                  padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
                   child: Form(
                     key: _formKey,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Vehicle selector
-                        Text(
-                          'Vehicle',
-                          style: GoogleFonts.spaceGrotesk(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: isDark
-                                ? AppColors.darkTextSub
-                                : AppColors.lightTextSub,
-                          ),
-                        ),
+                        // ── Vehicle selector ──────────────────────────────
+                        _sectionLabel('Vehicle', isDark),
                         const SizedBox(height: 8),
-                        Container(
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(14),
-                            color: isDark
-                                ? AppColors.darkSurface
-                                : AppColors.lightSurface,
-                            border: Border.all(
-                              color: isDark
-                                  ? AppColors.darkBorder
-                                  : AppColors.lightBorder,
-                              width: 1.5,
-                            ),
-                          ),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<VehicleModel>(
-                              value: _selectedVehicle,
-                              isExpanded: true,
-                              borderRadius: BorderRadius.circular(14),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 4,
-                              ),
-                              dropdownColor: isDark
-                                  ? AppColors.darkSurfaceAlt
-                                  : AppColors.lightSurface,
-                              items: widget.vehicles
-                                  .map(
-                                    (v) => DropdownMenuItem(
-                                      value: v,
-                                      child: Text(
-                                        '${v.shortDisplay} · ${v.registrationNo}',
-                                        style: GoogleFonts.inter(
-                                          fontSize: 14,
-                                          color: isDark
-                                              ? AppColors.darkText
-                                              : AppColors.lightText,
-                                        ),
-                                      ),
-                                    ),
-                                  )
-                                  .toList(),
-                              onChanged: (v) {
-                                if (v != null) {
-                                  setState(() => _selectedVehicle = v);
-                                }
-                              },
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-
-                        // Fuel type badge
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.local_gas_station_rounded,
-                              size: 14,
-                              color: isDark
-                                  ? AppColors.darkTextSub
-                                  : AppColors.lightTextSub,
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              'Fuel Type: ',
-                              style: GoogleFonts.inter(
-                                fontSize: 13,
-                                color: isDark
-                                    ? AppColors.darkTextSub
-                                    : AppColors.lightTextSub,
-                              ),
-                            ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 3,
-                              ),
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(6),
-                                color: AppColors.emerald.withOpacity(
-                                  isDark ? 0.14 : 0.10,
-                                ),
-                              ),
-                              child: Text(
-                                _selectedVehicle.fuelType,
-                                style: GoogleFonts.spaceGrotesk(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: AppColors.emerald,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 20),
-
-                        // Litres
-                        AppTextField(
-                          label: 'Litres Filled',
-                          hint: 'e.g. 10.5',
-                          controller: _litresCtrl,
-                          prefixIcon: Icons.opacity_rounded,
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                          inputFormatters: [
-                            FilteringTextInputFormatter.allow(
-                              RegExp(r'^\d*\.?\d*'),
-                            ),
-                          ],
-                          validator: (v) {
-                            if (v == null || v.trim().isEmpty) {
-                              return 'Litres is required';
-                            }
-                            final d = double.tryParse(v.trim());
-                            if (d == null || d <= 0) {
-                              return 'Enter a valid amount';
-                            }
-                            return null;
+                        _dropdown<VehicleModel>(
+                          isDark: isDark,
+                          value: _selectedVehicle,
+                          items: widget.vehicles,
+                          itemLabel: (v) =>
+                              '${v.shortDisplay} · ${v.registrationNo}',
+                          onChanged: (v) async {
+                            if (v == null) return;
+                            setState(() => _selectedVehicle = v);
+                            await _refreshGradesAndLimits();
                           },
                         ),
-                        const SizedBox(height: 14),
-
-                        // Price per litre
-                        AppTextField(
-                          label: 'Price per Litre (LKR)',
-                          hint: 'e.g. 320.00',
-                          controller: _priceCtrl,
-                          prefixIcon: Icons.payments_outlined,
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                          inputFormatters: [
-                            FilteringTextInputFormatter.allow(
-                              RegExp(r'^\d*\.?\d*'),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 14),
-
-                        // Odometer
-                        AppTextField(
-                          label: 'Odometer Reading (km)',
-                          hint: 'e.g. 45230',
-                          controller: _odometerCtrl,
-                          prefixIcon: Icons.speed_rounded,
-                          keyboardType: TextInputType.number,
-                          inputFormatters: [
-                            FilteringTextInputFormatter.digitsOnly,
-                          ],
-                        ),
-                        const SizedBox(height: 14),
-
-                        // Station name
-                        AppTextField(
-                          label: 'Station Name',
-                          hint: 'e.g. CPC Colombo 7',
-                          controller: _stationCtrl,
-                          prefixIcon: Icons.place_outlined,
-                        ),
-                        const SizedBox(height: 14),
-
-                        // Notes
-                        AppTextField(
-                          label: 'Notes (optional)',
-                          hint: 'Any additional notes…',
-                          controller: _notesCtrl,
-                          prefixIcon: Icons.notes_rounded,
-                          maxLines: 3,
-                        ),
                         const SizedBox(height: 20),
 
-                        // Total cost preview
-                        if (_totalCost > 0)
-                          Container(
-                            padding: const EdgeInsets.all(16),
-                            margin: const EdgeInsets.only(bottom: 20),
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(14),
-                              gradient: LinearGradient(
-                                colors: [
-                                  AppColors.emerald.withOpacity(0.12),
-                                  AppColors.ocean.withOpacity(0.10),
-                                ],
+                        // ── Quota + wallet info bar ───────────────────────
+                        if (_limitsLoaded)
+                          _buildLimitsBar(isDark)
+                        else
+                          const Center(
+                            child: Padding(
+                              padding: EdgeInsets.symmetric(vertical: 12),
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: AppColors.emerald,
                               ),
-                              border: Border.all(
-                                color: AppColors.emerald.withOpacity(0.25),
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(
-                                  Icons.calculate_outlined,
-                                  size: 20,
-                                  color: AppColors.emerald,
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Text(
-                                    'Estimated total cost',
-                                    style: GoogleFonts.inter(
-                                      fontSize: 13,
-                                      color: isDark
-                                          ? AppColors.darkTextSub
-                                          : AppColors.lightTextSub,
-                                    ),
-                                  ),
-                                ),
-                                Text(
-                                  'LKR ${_totalCost.toStringAsFixed(2)}',
-                                  style: GoogleFonts.spaceGrotesk(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w700,
-                                    color: AppColors.emerald,
-                                  ),
-                                ),
-                              ],
                             ),
                           ),
+                        const SizedBox(height: 20),
 
-                        // Save button
-                        GradientButton(
-                          label: 'Save Fuel Log',
-                          onPressed: _save,
-                          isLoading: _isSaving,
-                        ),
+                        // ── Fuel grade selector ───────────────────────────
+                        if (_availableGrades.isEmpty) ...[
+                          _buildUnsupportedFuelNote(isDark),
+                        ] else ...[
+                          _sectionLabel('Fuel Grade', isDark),
+                          const SizedBox(height: 10),
+                          _buildGradeSelector(isDark),
+                          const SizedBox(height: 20),
+
+                          // ── Litres field ──────────────────────────────
+                          _sectionLabel('Litres Filled', isDark),
+                          const SizedBox(height: 8),
+                          _buildLitresField(isDark),
+                          const SizedBox(height: 20),
+
+                          // ── Station name ──────────────────────────────
+                          AppTextField(
+                            label: 'Station Name (optional)',
+                            hint: 'e.g. CPC Colombo 7',
+                            controller: _stationCtrl,
+                            prefixIcon: Icons.place_outlined,
+                          ),
+                          const SizedBox(height: 20),
+
+                          // ── Cost preview ──────────────────────────────
+                          if (_totalCost > 0) _buildCostPreview(isDark),
+                          const SizedBox(height: 8),
+
+                          // ── Save button ───────────────────────────────
+                          GradientButton(
+                            label: 'Save Fuel Log',
+                            onPressed: (_limitsLoaded && _maxLitres > 0)
+                                ? _save
+                                : null,
+                            isLoading: _isSaving,
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -1608,6 +1513,439 @@ class _FuelLogSheetState extends State<_FuelLogSheet> {
           ),
         );
       },
+    );
+  }
+
+  // ── Quota + wallet limits bar ─────────────────────────────────────────────
+  Widget _buildLimitsBar(bool isDark) {
+    final walletLitres = _selectedGrade != null
+        ? _walletBalance / _selectedGrade!.pricePerLitre
+        : double.infinity;
+    final effectiveMax = _maxLitres;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+        border: Border.all(
+          color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+        ),
+      ),
+      child: Column(
+        children: [
+          _limitRow(
+            icon: Icons.local_gas_station_rounded,
+            label: 'Weekly quota remaining',
+            value: '${_quotaRemaining.toStringAsFixed(1)} L',
+            color: _quotaRemaining > 0 ? AppColors.emerald : AppColors.error,
+            isDark: isDark,
+          ),
+          const SizedBox(height: 10),
+          _limitRow(
+            icon: Icons.account_balance_wallet_rounded,
+            label: 'Wallet balance',
+            value: 'Rs. ${_walletBalance.toStringAsFixed(2)}',
+            color: _walletBalance > 0 ? AppColors.ocean : AppColors.error,
+            isDark: isDark,
+          ),
+          if (_selectedGrade != null && walletLitres.isFinite) ...[
+            const SizedBox(height: 10),
+            _limitRow(
+              icon: Icons.straighten_rounded,
+              label: 'Max you can fill now',
+              value: effectiveMax > 0
+                  ? '${effectiveMax.toStringAsFixed(1)} L'
+                  : 'Top up wallet or wait for quota reset',
+              color: effectiveMax > 0 ? AppColors.amber : AppColors.error,
+              isDark: isDark,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _limitRow({
+    required IconData icon,
+    required String label,
+    required String value,
+    required Color color,
+    required bool isDark,
+  }) {
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: color),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            label,
+            style: GoogleFonts.inter(
+              fontSize: 12,
+              color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
+            ),
+          ),
+        ),
+        Text(
+          value,
+          style: GoogleFonts.spaceGrotesk(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: color,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Grade selector ────────────────────────────────────────────────────────
+  Widget _buildGradeSelector(bool isDark) {
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      children: _availableGrades.map((grade) {
+        final isSelected = _selectedGrade?.name == grade.name;
+        Color accent = _gradeAccent(grade.name);
+        return GestureDetector(
+          onTap: () {
+            setState(() {
+              _selectedGrade = grade;
+              _litresCtrl.clear();
+            });
+          },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              gradient: isSelected
+                  ? LinearGradient(
+                      colors: [accent, accent.withOpacity(0.75)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    )
+                  : null,
+              color: isSelected
+                  ? null
+                  : (isDark ? AppColors.darkSurface : AppColors.lightSurface),
+              border: Border.all(
+                color: isSelected
+                    ? accent
+                    : (isDark ? AppColors.darkBorder : AppColors.lightBorder),
+                width: isSelected ? 0 : 1.5,
+              ),
+              boxShadow: isSelected
+                  ? [
+                      BoxShadow(
+                        color: accent.withOpacity(0.3),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ]
+                  : null,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  grade.name,
+                  style: GoogleFonts.spaceGrotesk(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: isSelected
+                        ? Colors.white
+                        : (isDark ? AppColors.darkText : AppColors.lightText),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Rs. ${grade.pricePerLitre.toStringAsFixed(0)}/L',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: isSelected
+                        ? Colors.white.withOpacity(0.85)
+                        : (isDark
+                              ? AppColors.darkTextSub
+                              : AppColors.lightTextSub),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  // ── Litres field with live validation ─────────────────────────────────────
+  Widget _buildLitresField(bool isDark) {
+    final max = _maxLitres;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextFormField(
+          controller: _litresCtrl,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: [
+            FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
+          ],
+          style: Theme.of(context).textTheme.bodyLarge,
+          decoration: InputDecoration(
+            labelText: 'Litres',
+            hintText: max > 0
+                ? 'Max ${max.toStringAsFixed(1)} L'
+                : 'No quota or balance available',
+            prefixIcon: const Icon(Icons.opacity_rounded, size: 20),
+            suffixText: 'L',
+            suffixStyle: GoogleFonts.spaceGrotesk(
+              fontWeight: FontWeight.w600,
+              color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
+            ),
+          ),
+          validator: (v) {
+            if (v == null || v.trim().isEmpty) return 'Litres is required';
+            final d = double.tryParse(v.trim());
+            if (d == null || d <= 0) return 'Enter a valid amount';
+            if (d > max + 0.001) {
+              return 'Max allowed: ${max.toStringAsFixed(1)} L '
+                  '(quota or wallet limit)';
+            }
+            return null;
+          },
+        ),
+        // Live progress bar
+        if (_litresCtrl.text.isNotEmpty && max > 0) ...[
+          const SizedBox(height: 8),
+          _buildLitresProgressBar(isDark, max),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildLitresProgressBar(bool isDark, double max) {
+    final entered = double.tryParse(_litresCtrl.text) ?? 0;
+    final ratio = (entered / max).clamp(0.0, 1.0);
+    final overLimit = entered > max + 0.001;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: LinearProgressIndicator(
+            value: ratio,
+            minHeight: 6,
+            backgroundColor: isDark
+                ? AppColors.darkBorder
+                : AppColors.lightBorder,
+            valueColor: AlwaysStoppedAnimation<Color>(
+              overLimit
+                  ? AppColors.error
+                  : ratio > 0.85
+                  ? AppColors.amber
+                  : AppColors.emerald,
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          overLimit
+              ? 'Exceeds limit'
+              : '${entered.toStringAsFixed(1)} / ${max.toStringAsFixed(1)} L',
+          style: GoogleFonts.inter(
+            fontSize: 11,
+            color: overLimit
+                ? AppColors.error
+                : isDark
+                ? AppColors.darkTextMuted
+                : AppColors.lightTextMuted,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Cost preview ──────────────────────────────────────────────────────────
+  Widget _buildCostPreview(bool isDark) {
+    final cost = _totalCost;
+    final affordable = cost <= _walletBalance + 0.001;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        gradient: LinearGradient(
+          colors: affordable
+              ? [
+                  AppColors.emerald.withOpacity(0.12),
+                  AppColors.ocean.withOpacity(0.10),
+                ]
+              : [
+                  AppColors.error.withOpacity(0.10),
+                  AppColors.error.withOpacity(0.06),
+                ],
+        ),
+        border: Border.all(
+          color: affordable
+              ? AppColors.emerald.withOpacity(0.25)
+              : AppColors.error.withOpacity(0.4),
+        ),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Icon(
+                affordable
+                    ? Icons.calculate_outlined
+                    : Icons.warning_amber_rounded,
+                size: 20,
+                color: affordable ? AppColors.emerald : AppColors.error,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  affordable
+                      ? 'Estimated total cost'
+                      : 'Insufficient wallet balance',
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    color: affordable
+                        ? (isDark
+                              ? AppColors.darkTextSub
+                              : AppColors.lightTextSub)
+                        : AppColors.error,
+                  ),
+                ),
+              ),
+              Text(
+                'Rs. ${cost.toStringAsFixed(2)}',
+                style: GoogleFonts.spaceGrotesk(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: affordable ? AppColors.emerald : AppColors.error,
+                ),
+              ),
+            ],
+          ),
+          if (!affordable) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const SizedBox(width: 30),
+                Expanded(
+                  child: Text(
+                    'Wallet: Rs. ${_walletBalance.toStringAsFixed(2)}  ·  '
+                    'Shortfall: Rs. ${(cost - _walletBalance).toStringAsFixed(2)}',
+                    style: GoogleFonts.inter(
+                      fontSize: 12,
+                      color: AppColors.error,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ── Unsupported fuel note ─────────────────────────────────────────────────
+  Widget _buildUnsupportedFuelNote(bool isDark) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+        border: Border.all(color: AppColors.amber.withOpacity(0.4)),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.info_outline_rounded,
+            color: AppColors.amber,
+            size: 20,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'Fuel logging is not available for '
+              '${_selectedVehicle.fuelType} vehicles '
+              '(Electric / LPG).',
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  Color _gradeAccent(String name) {
+    if (name.contains('95')) return const Color(0xFF7C3AED);
+    if (name.contains('92')) return AppColors.ocean;
+    if (name.contains('Super')) return AppColors.amber;
+    if (name.contains('Auto')) return const Color(0xFFF97316);
+    return const Color(0xFF6B7280);
+  }
+
+  Widget _sectionLabel(String text, bool isDark) {
+    return Text(
+      text,
+      style: GoogleFonts.spaceGrotesk(
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+        color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
+      ),
+    );
+  }
+
+  Widget _dropdown<T>({
+    required bool isDark,
+    required T value,
+    required List<T> items,
+    required String Function(T) itemLabel,
+    required void Function(T?) onChanged,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+        border: Border.all(
+          color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+          width: 1.5,
+        ),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<T>(
+          value: value,
+          isExpanded: true,
+          borderRadius: BorderRadius.circular(14),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          dropdownColor: isDark
+              ? AppColors.darkSurfaceAlt
+              : AppColors.lightSurface,
+          items: items
+              .map(
+                (item) => DropdownMenuItem<T>(
+                  value: item,
+                  child: Text(
+                    itemLabel(item),
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      color: isDark ? AppColors.darkText : AppColors.lightText,
+                    ),
+                  ),
+                ),
+              )
+              .toList(),
+          onChanged: onChanged,
+        ),
+      ),
     );
   }
 }
@@ -1796,7 +2134,7 @@ class _ActionCardState extends State<_ActionCard> {
   }
 }
 
-// ─── Vehicle chip (horizontal list item) ─────────────────────────────────────
+// ─── Vehicle chip ─────────────────────────────────────────────────────────────
 class _VehicleChip extends StatelessWidget {
   final VehicleModel vehicle;
   final bool isDark;

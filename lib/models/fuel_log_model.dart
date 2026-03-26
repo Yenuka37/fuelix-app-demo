@@ -4,12 +4,12 @@ class FuelLogModel {
   final int userId;
   final int vehicleId;
   final double litres;
-  final double odometerKm;
-  final String fuelType;
+  final String fuelType; // Petrol, Diesel, Hybrid, Kerosene …
+  final String
+  fuelGrade; // Petrol 92, Petrol 95, Auto Diesel, Super Diesel, Kerosene
   final double pricePerLitre;
   final double totalCost;
   final String stationName;
-  final String notes;
   final DateTime loggedAt;
 
   FuelLogModel({
@@ -17,12 +17,11 @@ class FuelLogModel {
     required this.userId,
     required this.vehicleId,
     required this.litres,
-    this.odometerKm = 0.0,
     required this.fuelType,
-    this.pricePerLitre = 0.0,
-    this.totalCost = 0.0,
+    required this.fuelGrade,
+    required this.pricePerLitre,
+    required this.totalCost,
     this.stationName = '',
-    this.notes = '',
     DateTime? loggedAt,
   }) : loggedAt = loggedAt ?? DateTime.now();
 
@@ -31,12 +30,11 @@ class FuelLogModel {
     'user_id': userId,
     'vehicle_id': vehicleId,
     'litres': litres,
-    'odometer_km': odometerKm,
     'fuel_type': fuelType,
+    'fuel_grade': fuelGrade,
     'price_per_litre': pricePerLitre,
     'total_cost': totalCost,
     'station_name': stationName,
-    'notes': notes,
     'logged_at': loggedAt.toIso8601String(),
   };
 
@@ -45,12 +43,11 @@ class FuelLogModel {
     userId: m['user_id'] as int,
     vehicleId: m['vehicle_id'] as int,
     litres: (m['litres'] as num).toDouble(),
-    odometerKm: (m['odometer_km'] as num).toDouble(),
     fuelType: m['fuel_type'] as String,
+    fuelGrade: m['fuel_grade'] as String? ?? '',
     pricePerLitre: (m['price_per_litre'] as num).toDouble(),
     totalCost: (m['total_cost'] as num).toDouble(),
     stationName: m['station_name'] as String? ?? '',
-    notes: m['notes'] as String? ?? '',
     loggedAt: DateTime.parse(m['logged_at'] as String),
   );
 
@@ -59,28 +56,26 @@ class FuelLogModel {
     int? userId,
     int? vehicleId,
     double? litres,
-    double? odometerKm,
     String? fuelType,
+    String? fuelGrade,
     double? pricePerLitre,
     double? totalCost,
     String? stationName,
-    String? notes,
     DateTime? loggedAt,
   }) => FuelLogModel(
     id: id ?? this.id,
     userId: userId ?? this.userId,
     vehicleId: vehicleId ?? this.vehicleId,
     litres: litres ?? this.litres,
-    odometerKm: odometerKm ?? this.odometerKm,
     fuelType: fuelType ?? this.fuelType,
+    fuelGrade: fuelGrade ?? this.fuelGrade,
     pricePerLitre: pricePerLitre ?? this.pricePerLitre,
     totalCost: totalCost ?? this.totalCost,
     stationName: stationName ?? this.stationName,
-    notes: notes ?? this.notes,
     loggedAt: loggedAt ?? this.loggedAt,
   );
 
-  /// Formatted date string e.g. "25 Mar 2026"
+  /// e.g. "25 Mar 2026"
   String get formattedDate {
     const months = [
       'Jan',
@@ -99,7 +94,7 @@ class FuelLogModel {
     return '${loggedAt.day} ${months[loggedAt.month - 1]} ${loggedAt.year}';
   }
 
-  /// Formatted time string e.g. "14:35"
+  /// e.g. "14:35"
   String get formattedTime {
     final h = loggedAt.hour.toString().padLeft(2, '0');
     final m = loggedAt.minute.toString().padLeft(2, '0');

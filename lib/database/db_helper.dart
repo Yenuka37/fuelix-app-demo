@@ -17,7 +17,7 @@ class DbHelper {
   static Database? _database;
 
   static const String _dbName = 'fuelix.db';
-  static const int _dbVersion = 8; // bumped for fuel_logs table
+  static const int _dbVersion = 8;
   static const String _usersTable = 'users';
   static const String _vehiclesTable = 'vehicles';
   static const String _quotasTable = 'fuel_quotas';
@@ -42,7 +42,7 @@ class DbHelper {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // Schema creation
+  // Schema
   // ══════════════════════════════════════════════════════════════════════════
   Future<void> _onCreate(Database db, int version) async {
     await db.execute('''
@@ -138,12 +138,11 @@ class DbHelper {
         user_id         INTEGER NOT NULL,
         vehicle_id      INTEGER NOT NULL,
         litres          REAL    NOT NULL,
-        odometer_km     REAL    NOT NULL DEFAULT 0.0,
         fuel_type       TEXT    NOT NULL,
+        fuel_grade      TEXT    NOT NULL DEFAULT '',
         price_per_litre REAL    NOT NULL DEFAULT 0.0,
         total_cost      REAL    NOT NULL DEFAULT 0.0,
         station_name    TEXT    NOT NULL DEFAULT '',
-        notes           TEXT    NOT NULL DEFAULT '',
         logged_at       TEXT    NOT NULL,
         FOREIGN KEY (user_id)    REFERENCES $_usersTable(id)    ON DELETE CASCADE,
         FOREIGN KEY (vehicle_id) REFERENCES $_vehiclesTable(id) ON DELETE CASCADE
@@ -179,9 +178,7 @@ class DbHelper {
         );
       } catch (_) {}
     }
-    if (oldVersion < 4) {
-      await _createVehiclesTable(db);
-    }
+    if (oldVersion < 4) await _createVehiclesTable(db);
     if (oldVersion < 5) {
       try {
         await db.execute(
@@ -192,16 +189,12 @@ class DbHelper {
         );
       } catch (_) {}
     }
-    if (oldVersion < 6) {
-      await _createQuotasTable(db);
-    }
+    if (oldVersion < 6) await _createQuotasTable(db);
     if (oldVersion < 7) {
       await _createWalletTable(db);
       await _createTopupTable(db);
     }
-    if (oldVersion < 8) {
-      await _createFuelLogsTable(db);
-    }
+    if (oldVersion < 8) await _createFuelLogsTable(db);
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -417,24 +410,6 @@ class DbHelper {
     return r.map(FuelQuotaModel.fromMap).toList();
   }
 
-  Future<FuelQuotaModel?> recordFuelUsage(
-    int vehicleId,
-    String vehicleType,
-    double litres,
-  ) async {
-    final db = await database;
-    final quota = await getCurrentWeekQuota(vehicleId, vehicleType);
-    if (quota == null || quota.id == null) return null;
-    final newUsed = (quota.usedLitres + litres).clamp(0.0, quota.quotaLitres);
-    await db.update(
-      _quotasTable,
-      {'used_litres': newUsed},
-      where: 'id = ?',
-      whereArgs: [quota.id],
-    );
-    return quota.copyWith(usedLitres: newUsed);
-  }
-
   // ══════════════════════════════════════════════════════════════════════════
   // WALLET CRUD
   // ══════════════════════════════════════════════════════════════════════════
@@ -471,7 +446,6 @@ class DbHelper {
   }) async {
     final db = await database;
     TopUpTransactionModel? result;
-
     await db.transaction((txn) async {
       final walletRows = await txn.query(
         _walletTable,
@@ -484,7 +458,6 @@ class DbHelper {
           : 0.0;
       final newBalance = currentBalance + amount;
       final now = DateTime.now().toIso8601String();
-
       if (walletRows.isEmpty) {
         await txn.insert(_walletTable, {
           'user_id': userId,
@@ -499,7 +472,6 @@ class DbHelper {
           whereArgs: [userId],
         );
       }
-
       final txn2 = TopUpTransactionModel(
         userId: userId,
         amount: amount,
@@ -519,7 +491,6 @@ class DbHelper {
         createdAt: txn2.createdAt,
       );
     });
-
     return result;
   }
 
@@ -535,21 +506,110 @@ class DbHelper {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // FUEL LOGS CRUD
+  // FUEL LOGS — atomic save (quota deduction + wallet deduction)
   // ══════════════════════════════════════════════════════════════════════════
 
-  /// Insert a new fuel log. Returns the new row id, or -1 on failure.
-  Future<int> insertFuelLog(FuelLogModel log) async {
+  /// Saves a fuel log inside a single transaction:
+  ///   1. Ensures a current-week quota record exists.
+  ///   2. Checks litre headroom  → returns -1 if exceeded.
+  ///   3. Checks wallet balance  → returns -2 if insufficient.
+  ///   4. Deducts litres from quota.
+  ///   5. Deducts total_cost from wallet.
+  ///   6. Inserts the fuel log row.
+  ///
+  /// Returns inserted row id (>0) on success, or:
+  ///   -1  quota limit exceeded
+  ///   -2  wallet balance insufficient
+  ///   -3  other db error
+  Future<int> saveFuelLog(FuelLogModel log, String vehicleType) async {
     final db = await database;
-    try {
-      return await db.insert(
-        _fuelLogsTable,
-        log.toMap()..remove('id'),
-        conflictAlgorithm: ConflictAlgorithm.fail,
+    int resultId = -3;
+
+    await db.transaction((txn) async {
+      // ── 1. Get or create current-week quota ───────────────────────────────
+      final quotaRows = await txn.query(
+        _quotasTable,
+        where: 'vehicle_id = ?',
+        whereArgs: [log.vehicleId],
+        orderBy: 'week_start DESC',
+        limit: 1,
       );
-    } catch (_) {
-      return -1;
-    }
+
+      FuelQuotaModel quota;
+      if (quotaRows.isNotEmpty) {
+        final existing = FuelQuotaModel.fromMap(quotaRows.first);
+        if (QuotaService.isCurrentWeek(existing, DateTime.now())) {
+          quota = existing;
+        } else {
+          final fresh = QuotaService.newWeekQuota(log.vehicleId, vehicleType);
+          final newId = await txn.insert(
+            _quotasTable,
+            fresh.toMap()..remove('id'),
+          );
+          quota = fresh.copyWith(id: newId);
+        }
+      } else {
+        final fresh = QuotaService.newWeekQuota(log.vehicleId, vehicleType);
+        final newId = await txn.insert(
+          _quotasTable,
+          fresh.toMap()..remove('id'),
+        );
+        quota = fresh.copyWith(id: newId);
+      }
+
+      // ── 2. Validate litre limit ────────────────────────────────────────────
+      if (log.litres > quota.remainingLitres + 0.001) {
+        resultId = -1;
+        return;
+      }
+
+      // ── 3. Validate wallet balance ─────────────────────────────────────────
+      final walletRows = await txn.query(
+        _walletTable,
+        where: 'user_id = ?',
+        whereArgs: [log.userId],
+        limit: 1,
+      );
+      final currentBalance = walletRows.isNotEmpty
+          ? (walletRows.first['balance'] as num).toDouble()
+          : 0.0;
+
+      if (log.totalCost > currentBalance + 0.001) {
+        resultId = -2;
+        return;
+      }
+
+      // ── 4. Deduct from quota ───────────────────────────────────────────────
+      await txn.update(
+        _quotasTable,
+        {'used_litres': quota.usedLitres + log.litres},
+        where: 'id = ?',
+        whereArgs: [quota.id],
+      );
+
+      // ── 5. Deduct from wallet ──────────────────────────────────────────────
+      final newBalance = currentBalance - log.totalCost;
+      final now = DateTime.now().toIso8601String();
+      if (walletRows.isEmpty) {
+        await txn.insert(_walletTable, {
+          'user_id': log.userId,
+          'balance': newBalance,
+          'updated_at': now,
+        });
+      } else {
+        await txn.update(
+          _walletTable,
+          {'balance': newBalance, 'updated_at': now},
+          where: 'user_id = ?',
+          whereArgs: [log.userId],
+        );
+      }
+
+      // ── 6. Insert fuel log ─────────────────────────────────────────────────
+      resultId = await txn.insert(_fuelLogsTable, log.toMap()..remove('id'));
+    });
+
+    return resultId;
   }
 
   /// All fuel logs for a user, newest first.
@@ -581,38 +641,34 @@ class DbHelper {
     return r.map(FuelLogModel.fromMap).toList();
   }
 
-  /// Delete a fuel log entry.
+  /// Delete a single fuel log entry.
   Future<int> deleteFuelLog(int id) async {
     final db = await database;
     return db.delete(_fuelLogsTable, where: 'id = ?', whereArgs: [id]);
   }
 
-  /// Aggregate stats for a user: total logs, total litres, total km.
+  /// Aggregate stats for a user: total logs, total litres, total spent.
   Future<Map<String, double>> getFuelLogStats(int userId) async {
     final db = await database;
     final r = await db.rawQuery(
       '''
       SELECT
-        COUNT(*)         AS total_logs,
-        SUM(litres)      AS total_litres,
-        MAX(odometer_km) AS max_odometer,
-        MIN(odometer_km) AS min_odometer
+        COUNT(*)        AS total_logs,
+        SUM(litres)     AS total_litres,
+        SUM(total_cost) AS total_spent
       FROM $_fuelLogsTable
       WHERE user_id = ?
     ''',
       [userId],
     );
-    if (r.isEmpty) return {'total_logs': 0, 'total_litres': 0, 'total_km': 0};
+    if (r.isEmpty) {
+      return {'total_logs': 0, 'total_litres': 0, 'total_spent': 0};
+    }
     final row = r.first;
-    final totalLogs = (row['total_logs'] as num?)?.toDouble() ?? 0;
-    final totalLitres = (row['total_litres'] as num?)?.toDouble() ?? 0;
-    final maxOdo = (row['max_odometer'] as num?)?.toDouble() ?? 0;
-    final minOdo = (row['min_odometer'] as num?)?.toDouble() ?? 0;
-    final totalKm = maxOdo > minOdo ? maxOdo - minOdo : 0.0;
     return {
-      'total_logs': totalLogs,
-      'total_litres': totalLitres,
-      'total_km': totalKm,
+      'total_logs': (row['total_logs'] as num?)?.toDouble() ?? 0,
+      'total_litres': (row['total_litres'] as num?)?.toDouble() ?? 0,
+      'total_spent': (row['total_spent'] as num?)?.toDouble() ?? 0,
     };
   }
 
