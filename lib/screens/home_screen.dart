@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import '../models/user_model.dart';
 import '../models/vehicle_model.dart';
 import '../models/topup_model.dart';
+import '../models/fuel_log_model.dart';
 import '../database/db_helper.dart';
 import '../services/tutorial_service.dart';
+import '../widgets/custom_button.dart';
 import '../widgets/tutorial_overlay.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -24,6 +27,12 @@ class _HomeScreenState extends State<HomeScreen>
   UserModel? _user;
   List<VehicleModel> _vehicles = [];
   WalletModel? _wallet;
+  List<FuelLogModel> _recentLogs = [];
+  Map<String, double> _stats = {
+    'total_logs': 0,
+    'total_litres': 0,
+    'total_km': 0,
+  };
   final _db = DbHelper();
 
   // ── Tutorial keys ─────────────────────────────────────────────────────────
@@ -56,8 +65,7 @@ class _HomeScreenState extends State<HomeScreen>
     final u = ModalRoute.of(context)?.settings.arguments as UserModel?;
     if (u != null && _user?.id != u.id) {
       _user = u;
-      _loadVehicles();
-      _loadWallet();
+      _loadAll();
       _checkHomeTour();
     }
   }
@@ -68,10 +76,13 @@ class _HomeScreenState extends State<HomeScreen>
     super.dispose();
   }
 
+  Future<void> _loadAll() async {
+    await Future.wait([_loadVehicles(), _loadWallet(), _loadFuelData()]);
+  }
+
   Future<void> _checkHomeTour() async {
     final seen = await TutorialService.isSeen(TutorialKey.homeTour);
     if (!seen && mounted) {
-      // Give screen time to render before showing tour
       await Future.delayed(const Duration(milliseconds: 600));
       if (mounted) setState(() => _showTour = true);
     }
@@ -89,6 +100,18 @@ class _HomeScreenState extends State<HomeScreen>
     if (mounted) setState(() => _wallet = w);
   }
 
+  Future<void> _loadFuelData() async {
+    if (_user?.id == null) return;
+    final logs = await _db.getFuelLogsByUser(_user!.id!, limit: 10);
+    final stats = await _db.getFuelLogStats(_user!.id!);
+    if (mounted) {
+      setState(() {
+        _recentLogs = logs;
+        _stats = stats;
+      });
+    }
+  }
+
   void _goToVehicles() async {
     await Navigator.pushNamed(context, '/vehicles', arguments: _user);
     _loadVehicles();
@@ -97,6 +120,29 @@ class _HomeScreenState extends State<HomeScreen>
   void _goToTopUp() async {
     await Navigator.pushNamed(context, '/topup', arguments: _user);
     _loadWallet();
+  }
+
+  void _openFuelLogSheet() {
+    if (_vehicles.isEmpty) {
+      showAppSnackbar(
+        context,
+        message: 'Add a vehicle first before logging fuel.',
+        isError: true,
+      );
+      return;
+    }
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _FuelLogSheet(
+        user: _user!,
+        vehicles: _vehicles,
+        onSaved: () {
+          _loadFuelData();
+        },
+      ),
+    );
   }
 
   void _logout() {
@@ -242,7 +288,7 @@ class _HomeScreenState extends State<HomeScreen>
                           sublabel: 'Track refuels',
                           gradient: [AppColors.emerald, AppColors.emeraldDark],
                           isDark: isDark,
-                          onTap: () {},
+                          onTap: _openFuelLogSheet,
                         ),
                         _ActionCard(
                           icon: Icons.bar_chart_rounded,
@@ -278,16 +324,61 @@ class _HomeScreenState extends State<HomeScreen>
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(24, 28, 24, 14),
-                      child: Text(
-                        'Recent Activity',
-                        style: Theme.of(context).textTheme.headlineSmall,
+                      child: Row(
+                        children: [
+                          Text(
+                            'Recent Fuel Logs',
+                            style: Theme.of(context).textTheme.headlineSmall,
+                          ),
+                          const Spacer(),
+                          if (_recentLogs.isNotEmpty)
+                            GestureDetector(
+                              onTap: _openFuelLogSheet,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(20),
+                                  color: AppColors.emerald.withOpacity(
+                                    isDark ? 0.12 : 0.08,
+                                  ),
+                                  border: Border.all(
+                                    color: AppColors.emerald.withOpacity(0.3),
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      Icons.add_rounded,
+                                      size: 13,
+                                      color: AppColors.emerald,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'Add Log',
+                                      style: GoogleFonts.spaceGrotesk(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: AppColors.emerald,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                   ),
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(24, 0, 24, 0),
-                      child: _buildEmptyActivity(isDark),
+                      child: _recentLogs.isEmpty
+                          ? _buildEmptyActivity(isDark)
+                          : _buildRecentLogs(isDark),
                     ),
                   ),
                   const SliverToBoxAdapter(child: SizedBox(height: 40)),
@@ -299,7 +390,6 @@ class _HomeScreenState extends State<HomeScreen>
       ),
     );
 
-    // Wrap with spotlight tour when active
     if (!_showTour) return screen;
 
     return SpotlightTour(
@@ -409,7 +499,6 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ),
         const SizedBox(width: 10),
-        // Avatar → profile
         GestureDetector(
           onTap: () =>
               Navigator.pushNamed(context, '/profile', arguments: user),
@@ -561,12 +650,16 @@ class _HomeScreenState extends State<HomeScreen>
 
   // ── Stats row ─────────────────────────────────────────────────────────────
   Widget _buildStatsRow(bool isDark) {
+    final totalLogs = _stats['total_logs']?.toInt() ?? 0;
+    final totalLitres = _stats['total_litres'] ?? 0.0;
+    final totalKm = _stats['total_km'] ?? 0.0;
+
     return Row(
       children: [
         Expanded(
           child: _StatCard(
             label: 'Total Logs',
-            value: '0',
+            value: '$totalLogs',
             icon: Icons.list_alt_rounded,
             color: AppColors.emerald,
             isDark: isDark,
@@ -576,7 +669,7 @@ class _HomeScreenState extends State<HomeScreen>
         Expanded(
           child: _StatCard(
             label: 'Fuel Used',
-            value: '0 L',
+            value: '${totalLitres.toStringAsFixed(1)} L',
             icon: Icons.local_gas_station_rounded,
             color: AppColors.ocean,
             isDark: isDark,
@@ -586,7 +679,7 @@ class _HomeScreenState extends State<HomeScreen>
         Expanded(
           child: _StatCard(
             label: 'Total Km',
-            value: '0 km',
+            value: '${totalKm.toStringAsFixed(0)} km',
             icon: Icons.speed_rounded,
             color: AppColors.amber,
             isDark: isDark,
@@ -689,7 +782,6 @@ class _HomeScreenState extends State<HomeScreen>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Section header
         Row(
           children: [
             Text(
@@ -733,7 +825,6 @@ class _HomeScreenState extends State<HomeScreen>
           ],
         ),
         const SizedBox(height: 14),
-        // Content
         if (_vehicles.isEmpty)
           _VehicleEmptyCard(isDark: isDark, onAdd: _goToVehicles)
         else
@@ -742,7 +833,7 @@ class _HomeScreenState extends State<HomeScreen>
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               physics: const BouncingScrollPhysics(),
-              itemCount: _vehicles.length + 1, // +1 for "Add" card
+              itemCount: _vehicles.length + 1,
               separatorBuilder: (_, __) => const SizedBox(width: 12),
               itemBuilder: (_, i) {
                 if (i == _vehicles.length) {
@@ -756,37 +847,104 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  // ── Recent Fuel Logs ──────────────────────────────────────────────────────
+  Widget _buildRecentLogs(bool isDark) {
+    return Column(
+      children: _recentLogs.map((log) {
+        final vehicle = _vehicles.firstWhere(
+          (v) => v.id == log.vehicleId,
+          orElse: () => VehicleModel(
+            userId: log.userId,
+            type: 'Car',
+            make: 'Unknown',
+            model: '',
+            year: '',
+            registrationNo: '',
+            fuelType: log.fuelType,
+          ),
+        );
+        return _FuelLogTile(
+          log: log,
+          vehicle: vehicle,
+          isDark: isDark,
+          onDelete: () async {
+            if (log.id == null) return;
+            await _db.deleteFuelLog(log.id!);
+            _loadFuelData();
+          },
+        );
+      }).toList(),
+    );
+  }
+
   // ── Empty activity ────────────────────────────────────────────────────────
   Widget _buildEmptyActivity(bool isDark) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 20),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-        border: Border.all(
-          color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+    return GestureDetector(
+      onTap: _openFuelLogSheet,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 20),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+          border: Border.all(
+            color: AppColors.emerald.withOpacity(0.25),
+            width: 1.5,
+          ),
         ),
-      ),
-      child: Column(
-        children: [
-          Icon(
-            Icons.inbox_outlined,
-            size: 44,
-            color: isDark ? AppColors.darkTextMuted : AppColors.lightTextMuted,
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'No activity yet',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
+        child: Column(
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: AppColors.emerald.withOpacity(isDark ? 0.12 : 0.08),
+              ),
+              child: const Icon(
+                Icons.local_gas_station_rounded,
+                size: 26,
+                color: AppColors.emerald,
+              ),
             ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Your fuel logs will appear here',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-        ],
+            const SizedBox(height: 14),
+            Text(
+              'No fuel logs yet',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Tap here to log your first refuel',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(20),
+                gradient: const LinearGradient(
+                  colors: [AppColors.emerald, AppColors.ocean],
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.add_rounded, size: 16, color: Colors.white),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Add Fuel Log',
+                    style: GoogleFonts.spaceGrotesk(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -799,264 +957,657 @@ class _HomeScreenState extends State<HomeScreen>
   }
 }
 
-// ─── Vehicle chip (horizontal list item) ─────────────────────────────────────
-class _VehicleChip extends StatelessWidget {
+// ═════════════════════════════════════════════════════════════════════════════
+// Fuel Log Tile
+// ═════════════════════════════════════════════════════════════════════════════
+class _FuelLogTile extends StatelessWidget {
+  final FuelLogModel log;
   final VehicleModel vehicle;
   final bool isDark;
-  const _VehicleChip({required this.vehicle, required this.isDark});
+  final VoidCallback onDelete;
 
-  Color _accent(String type) {
+  const _FuelLogTile({
+    required this.log,
+    required this.vehicle,
+    required this.isDark,
+    required this.onDelete,
+  });
+
+  Color _fuelColor(String type) {
     switch (type) {
-      case 'Car':
-        return AppColors.ocean;
-      case 'Motorcycle':
+      case 'Diesel':
         return AppColors.amber;
-      case 'Van':
+      case 'Electric':
         return AppColors.emerald;
-      case 'Truck':
-        return const Color(0xFFEF4444);
-      case 'Bus':
-        return const Color(0xFF7C3AED);
-      case 'Three-Wheeler':
+      case 'LPG':
         return const Color(0xFFF97316);
       default:
-        return AppColors.emerald;
-    }
-  }
-
-  IconData _icon(String type) {
-    switch (type) {
-      case 'Car':
-        return Icons.directions_car_rounded;
-      case 'Motorcycle':
-        return Icons.two_wheeler_rounded;
-      case 'Van':
-        return Icons.airport_shuttle_rounded;
-      case 'Truck':
-        return Icons.local_shipping_rounded;
-      case 'Bus':
-        return Icons.directions_bus_rounded;
-      case 'Three-Wheeler':
-        return Icons.electric_rickshaw_rounded;
-      default:
-        return Icons.directions_car_rounded;
+        return AppColors.ocean;
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final accent = _accent(vehicle.type);
+    final accent = _fuelColor(log.fuelType);
     return Container(
-      width: 150,
-      padding: const EdgeInsets.all(14),
+      margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
         border: Border.all(
           color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
         ),
-        boxShadow: [
-          BoxShadow(
-            color: accent.withOpacity(0.08),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(9),
-                  gradient: LinearGradient(
-                    colors: [accent, accent.withOpacity(0.7)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                ),
-                child: Icon(_icon(vehicle.type), size: 16, color: Colors.white),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onLongPress: () {
+          showDialog(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(18),
               ),
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(5),
-                  color: accent.withOpacity(isDark ? 0.15 : 0.10),
-                ),
-                child: Text(
-                  vehicle.fuelType,
-                  style: GoogleFonts.inter(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w600,
-                    color: accent,
-                  ),
-                ),
+              title: Text(
+                'Delete Log',
+                style: Theme.of(context).textTheme.headlineSmall,
               ),
-            ],
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                vehicle.shortDisplay,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.spaceGrotesk(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: isDark ? AppColors.darkText : AppColors.lightText,
-                ),
+              content: Text(
+                'Remove this fuel log entry?',
+                style: Theme.of(context).textTheme.bodyMedium,
               ),
-              const SizedBox(height: 2),
-              Text(
-                vehicle.registrationNo,
-                style: GoogleFonts.inter(
-                  fontSize: 11,
-                  color: isDark
-                      ? AppColors.darkTextMuted
-                      : AppColors.lightTextMuted,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─── Add vehicle card (horizontal list) ──────────────────────────────────────
-class _VehicleAddCard extends StatelessWidget {
-  final bool isDark;
-  final VoidCallback onTap;
-  const _VehicleAddCard({required this.isDark, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 100,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-          border: Border.all(
-            color: AppColors.emerald.withOpacity(0.35),
-            width: 1.5,
-          ),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: AppColors.emerald.withOpacity(isDark ? 0.15 : 0.10),
-              ),
-              child: const Icon(
-                Icons.add_rounded,
-                size: 20,
-                color: AppColors.emerald,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Add',
-              style: GoogleFonts.spaceGrotesk(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: AppColors.emerald,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Empty vehicle card ───────────────────────────────────────────────────────
-class _VehicleEmptyCard extends StatelessWidget {
-  final bool isDark;
-  final VoidCallback onAdd;
-  const _VehicleEmptyCard({required this.isDark, required this.onAdd});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onAdd,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 20),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-          border: Border.all(
-            color: AppColors.emerald.withOpacity(0.3),
-            width: 1.5,
-          ),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                gradient: LinearGradient(
-                  colors: [
-                    AppColors.emerald.withOpacity(0.15),
-                    AppColors.ocean.withOpacity(0.15),
-                  ],
-                ),
-              ),
-              child: const Icon(
-                Icons.add_rounded,
-                size: 22,
-                color: AppColors.emerald,
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Add your first vehicle',
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: Text(
+                    'Cancel',
                     style: GoogleFonts.spaceGrotesk(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: isDark ? AppColors.darkText : AppColors.lightText,
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    'Tap to add a car, bike or any vehicle',
-                    style: GoogleFonts.inter(
-                      fontSize: 12,
                       color: isDark
                           ? AppColors.darkTextSub
                           : AppColors.lightTextSub,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
-                ],
+                ),
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    onDelete();
+                  },
+                  child: Text(
+                    'Delete',
+                    style: GoogleFonts.spaceGrotesk(
+                      color: AppColors.error,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  color: accent.withOpacity(isDark ? 0.14 : 0.10),
+                ),
+                child: Icon(
+                  Icons.local_gas_station_rounded,
+                  size: 22,
+                  color: accent,
+                ),
               ),
-            ),
-            Icon(
-              Icons.arrow_forward_ios_rounded,
-              size: 14,
-              color: AppColors.emerald,
-            ),
-          ],
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            vehicle.shortDisplay,
+                            style: GoogleFonts.spaceGrotesk(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: isDark
+                                  ? AppColors.darkText
+                                  : AppColors.lightText,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        Text(
+                          '${log.litres.toStringAsFixed(1)} L',
+                          style: GoogleFonts.spaceGrotesk(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: accent,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(5),
+                            color: accent.withOpacity(isDark ? 0.15 : 0.10),
+                          ),
+                          child: Text(
+                            log.fuelType,
+                            style: GoogleFonts.inter(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: accent,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            log.stationName.isNotEmpty
+                                ? log.stationName
+                                : 'Unknown station',
+                            style: GoogleFonts.inter(
+                              fontSize: 12,
+                              color: isDark
+                                  ? AppColors.darkTextSub
+                                  : AppColors.lightTextSub,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        Text(
+                          log.totalCost > 0
+                              ? 'LKR ${log.totalCost.toStringAsFixed(0)}'
+                              : '',
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            color: isDark
+                                ? AppColors.darkTextMuted
+                                : AppColors.lightTextMuted,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${log.formattedDate} · ${log.formattedTime}'
+                      '${log.odometerKm > 0 ? ' · ${log.odometerKm.toStringAsFixed(0)} km' : ''}',
+                      style: GoogleFonts.inter(
+                        fontSize: 11,
+                        color: isDark
+                            ? AppColors.darkTextMuted
+                            : AppColors.lightTextMuted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
+    );
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Fuel Log Bottom Sheet
+// ═════════════════════════════════════════════════════════════════════════════
+class _FuelLogSheet extends StatefulWidget {
+  final UserModel user;
+  final List<VehicleModel> vehicles;
+  final VoidCallback onSaved;
+
+  const _FuelLogSheet({
+    required this.user,
+    required this.vehicles,
+    required this.onSaved,
+  });
+
+  @override
+  State<_FuelLogSheet> createState() => _FuelLogSheetState();
+}
+
+class _FuelLogSheetState extends State<_FuelLogSheet> {
+  final _formKey = GlobalKey<FormState>();
+  final _db = DbHelper();
+
+  late VehicleModel _selectedVehicle;
+  final _litresCtrl = TextEditingController();
+  final _odometerCtrl = TextEditingController();
+  final _priceCtrl = TextEditingController();
+  final _stationCtrl = TextEditingController();
+  final _notesCtrl = TextEditingController();
+
+  bool _isSaving = false;
+  double _totalCost = 0.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedVehicle = widget.vehicles.first;
+    _litresCtrl.addListener(_recalcCost);
+    _priceCtrl.addListener(_recalcCost);
+  }
+
+  @override
+  void dispose() {
+    _litresCtrl.removeListener(_recalcCost);
+    _priceCtrl.removeListener(_recalcCost);
+    _litresCtrl.dispose();
+    _odometerCtrl.dispose();
+    _priceCtrl.dispose();
+    _stationCtrl.dispose();
+    _notesCtrl.dispose();
+    super.dispose();
+  }
+
+  void _recalcCost() {
+    final litres = double.tryParse(_litresCtrl.text) ?? 0;
+    final price = double.tryParse(_priceCtrl.text) ?? 0;
+    setState(() => _totalCost = litres * price);
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _isSaving = true);
+
+    final log = FuelLogModel(
+      userId: widget.user.id!,
+      vehicleId: _selectedVehicle.id!,
+      litres: double.parse(_litresCtrl.text),
+      odometerKm: double.tryParse(_odometerCtrl.text) ?? 0.0,
+      fuelType: _selectedVehicle.fuelType,
+      pricePerLitre: double.tryParse(_priceCtrl.text) ?? 0.0,
+      totalCost: _totalCost,
+      stationName: _stationCtrl.text.trim(),
+      notes: _notesCtrl.text.trim(),
+      loggedAt: DateTime.now(),
+    );
+
+    final id = await _db.insertFuelLog(log);
+    if (mounted) {
+      setState(() => _isSaving = false);
+      if (id > 0) {
+        widget.onSaved();
+        Navigator.pop(context);
+        showAppSnackbar(
+          context,
+          message: 'Fuel log saved successfully!',
+          isSuccess: true,
+        );
+      } else {
+        showAppSnackbar(
+          context,
+          message: 'Failed to save log. Please try again.',
+          isError: true,
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return DraggableScrollableSheet(
+      initialChildSize: 0.9,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      builder: (_, scrollCtrl) {
+        return Container(
+          decoration: BoxDecoration(
+            color: isDark
+                ? AppColors.darkBackground
+                : AppColors.lightBackground,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.2),
+                blurRadius: 30,
+                offset: const Offset(0, -4),
+              ),
+            ],
+          ),
+          child: Column(
+            children: [
+              // Handle
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(top: 12, bottom: 4),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(2),
+                  color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                ),
+              ),
+              // Header
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 12, 16, 0),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        gradient: const LinearGradient(
+                          colors: [AppColors.emerald, AppColors.ocean],
+                        ),
+                      ),
+                      child: const Icon(
+                        Icons.local_gas_station_rounded,
+                        color: Colors.white,
+                        size: 20,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Log Fuel',
+                            style: Theme.of(context).textTheme.headlineMedium,
+                          ),
+                          Text(
+                            'Record a refuel for your vehicle',
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: isDark
+                                      ? AppColors.darkTextSub
+                                      : AppColors.lightTextSub,
+                                ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon: Icon(
+                        Icons.close_rounded,
+                        color: isDark
+                            ? AppColors.darkTextSub
+                            : AppColors.lightTextSub,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 4),
+              Divider(
+                color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                height: 1,
+              ),
+              // Form
+              Expanded(
+                child: SingleChildScrollView(
+                  controller: scrollCtrl,
+                  padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+                  child: Form(
+                    key: _formKey,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Vehicle selector
+                        Text(
+                          'Vehicle',
+                          style: GoogleFonts.spaceGrotesk(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: isDark
+                                ? AppColors.darkTextSub
+                                : AppColors.lightTextSub,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(14),
+                            color: isDark
+                                ? AppColors.darkSurface
+                                : AppColors.lightSurface,
+                            border: Border.all(
+                              color: isDark
+                                  ? AppColors.darkBorder
+                                  : AppColors.lightBorder,
+                              width: 1.5,
+                            ),
+                          ),
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<VehicleModel>(
+                              value: _selectedVehicle,
+                              isExpanded: true,
+                              borderRadius: BorderRadius.circular(14),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 4,
+                              ),
+                              dropdownColor: isDark
+                                  ? AppColors.darkSurfaceAlt
+                                  : AppColors.lightSurface,
+                              items: widget.vehicles
+                                  .map(
+                                    (v) => DropdownMenuItem(
+                                      value: v,
+                                      child: Text(
+                                        '${v.shortDisplay} · ${v.registrationNo}',
+                                        style: GoogleFonts.inter(
+                                          fontSize: 14,
+                                          color: isDark
+                                              ? AppColors.darkText
+                                              : AppColors.lightText,
+                                        ),
+                                      ),
+                                    ),
+                                  )
+                                  .toList(),
+                              onChanged: (v) {
+                                if (v != null) {
+                                  setState(() => _selectedVehicle = v);
+                                }
+                              },
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+
+                        // Fuel type badge
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.local_gas_station_rounded,
+                              size: 14,
+                              color: isDark
+                                  ? AppColors.darkTextSub
+                                  : AppColors.lightTextSub,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Fuel Type: ',
+                              style: GoogleFonts.inter(
+                                fontSize: 13,
+                                color: isDark
+                                    ? AppColors.darkTextSub
+                                    : AppColors.lightTextSub,
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(6),
+                                color: AppColors.emerald.withOpacity(
+                                  isDark ? 0.14 : 0.10,
+                                ),
+                              ),
+                              child: Text(
+                                _selectedVehicle.fuelType,
+                                style: GoogleFonts.spaceGrotesk(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.emerald,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 20),
+
+                        // Litres
+                        AppTextField(
+                          label: 'Litres Filled',
+                          hint: 'e.g. 10.5',
+                          controller: _litresCtrl,
+                          prefixIcon: Icons.opacity_rounded,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          inputFormatters: [
+                            FilteringTextInputFormatter.allow(
+                              RegExp(r'^\d*\.?\d*'),
+                            ),
+                          ],
+                          validator: (v) {
+                            if (v == null || v.trim().isEmpty) {
+                              return 'Litres is required';
+                            }
+                            final d = double.tryParse(v.trim());
+                            if (d == null || d <= 0) {
+                              return 'Enter a valid amount';
+                            }
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 14),
+
+                        // Price per litre
+                        AppTextField(
+                          label: 'Price per Litre (LKR)',
+                          hint: 'e.g. 320.00',
+                          controller: _priceCtrl,
+                          prefixIcon: Icons.payments_outlined,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          inputFormatters: [
+                            FilteringTextInputFormatter.allow(
+                              RegExp(r'^\d*\.?\d*'),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 14),
+
+                        // Odometer
+                        AppTextField(
+                          label: 'Odometer Reading (km)',
+                          hint: 'e.g. 45230',
+                          controller: _odometerCtrl,
+                          prefixIcon: Icons.speed_rounded,
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                          ],
+                        ),
+                        const SizedBox(height: 14),
+
+                        // Station name
+                        AppTextField(
+                          label: 'Station Name',
+                          hint: 'e.g. CPC Colombo 7',
+                          controller: _stationCtrl,
+                          prefixIcon: Icons.place_outlined,
+                        ),
+                        const SizedBox(height: 14),
+
+                        // Notes
+                        AppTextField(
+                          label: 'Notes (optional)',
+                          hint: 'Any additional notes…',
+                          controller: _notesCtrl,
+                          prefixIcon: Icons.notes_rounded,
+                          maxLines: 3,
+                        ),
+                        const SizedBox(height: 20),
+
+                        // Total cost preview
+                        if (_totalCost > 0)
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            margin: const EdgeInsets.only(bottom: 20),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(14),
+                              gradient: LinearGradient(
+                                colors: [
+                                  AppColors.emerald.withOpacity(0.12),
+                                  AppColors.ocean.withOpacity(0.10),
+                                ],
+                              ),
+                              border: Border.all(
+                                color: AppColors.emerald.withOpacity(0.25),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.calculate_outlined,
+                                  size: 20,
+                                  color: AppColors.emerald,
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    'Estimated total cost',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 13,
+                                      color: isDark
+                                          ? AppColors.darkTextSub
+                                          : AppColors.lightTextSub,
+                                    ),
+                                  ),
+                                ),
+                                Text(
+                                  'LKR ${_totalCost.toStringAsFixed(2)}',
+                                  style: GoogleFonts.spaceGrotesk(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppColors.emerald,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+
+                        // Save button
+                        GradientButton(
+                          label: 'Save Fuel Log',
+                          onPressed: _save,
+                          isLoading: _isSaving,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -1239,6 +1790,268 @@ class _ActionCardState extends State<_ActionCard> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Vehicle chip (horizontal list item) ─────────────────────────────────────
+class _VehicleChip extends StatelessWidget {
+  final VehicleModel vehicle;
+  final bool isDark;
+  const _VehicleChip({required this.vehicle, required this.isDark});
+
+  Color _accent(String type) {
+    switch (type) {
+      case 'Car':
+        return AppColors.ocean;
+      case 'Motorcycle':
+        return AppColors.amber;
+      case 'Van':
+        return AppColors.emerald;
+      case 'Truck':
+        return const Color(0xFFEF4444);
+      case 'Bus':
+        return const Color(0xFF7C3AED);
+      case 'Three-Wheeler':
+        return const Color(0xFFF97316);
+      default:
+        return AppColors.emerald;
+    }
+  }
+
+  IconData _icon(String type) {
+    switch (type) {
+      case 'Car':
+        return Icons.directions_car_rounded;
+      case 'Motorcycle':
+        return Icons.two_wheeler_rounded;
+      case 'Van':
+        return Icons.airport_shuttle_rounded;
+      case 'Truck':
+        return Icons.local_shipping_rounded;
+      case 'Bus':
+        return Icons.directions_bus_rounded;
+      case 'Three-Wheeler':
+        return Icons.electric_rickshaw_rounded;
+      default:
+        return Icons.directions_car_rounded;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = _accent(vehicle.type);
+    return Container(
+      width: 150,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+        border: Border.all(
+          color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: accent.withOpacity(0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(9),
+                  gradient: LinearGradient(
+                    colors: [accent, accent.withOpacity(0.7)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                ),
+                child: Icon(_icon(vehicle.type), size: 16, color: Colors.white),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(5),
+                  color: accent.withOpacity(isDark ? 0.15 : 0.10),
+                ),
+                child: Text(
+                  vehicle.fuelType,
+                  style: GoogleFonts.inter(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w600,
+                    color: accent,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                vehicle.shortDisplay,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.spaceGrotesk(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: isDark ? AppColors.darkText : AppColors.lightText,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                vehicle.registrationNo,
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  color: isDark
+                      ? AppColors.darkTextMuted
+                      : AppColors.lightTextMuted,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Add vehicle card ─────────────────────────────────────────────────────────
+class _VehicleAddCard extends StatelessWidget {
+  final bool isDark;
+  final VoidCallback onTap;
+  const _VehicleAddCard({required this.isDark, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 100,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+          border: Border.all(
+            color: AppColors.emerald.withOpacity(0.35),
+            width: 1.5,
+          ),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: AppColors.emerald.withOpacity(isDark ? 0.15 : 0.10),
+              ),
+              child: const Icon(
+                Icons.add_rounded,
+                size: 20,
+                color: AppColors.emerald,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Add',
+              style: GoogleFonts.spaceGrotesk(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: AppColors.emerald,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Empty vehicle card ───────────────────────────────────────────────────────
+class _VehicleEmptyCard extends StatelessWidget {
+  final bool isDark;
+  final VoidCallback onAdd;
+  const _VehicleEmptyCard({required this.isDark, required this.onAdd});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onAdd,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 20),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+          border: Border.all(
+            color: AppColors.emerald.withOpacity(0.3),
+            width: 1.5,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                gradient: LinearGradient(
+                  colors: [
+                    AppColors.emerald.withOpacity(0.15),
+                    AppColors.ocean.withOpacity(0.15),
+                  ],
+                ),
+              ),
+              child: const Icon(
+                Icons.add_rounded,
+                size: 22,
+                color: AppColors.emerald,
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Add your first vehicle',
+                    style: GoogleFonts.spaceGrotesk(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: isDark ? AppColors.darkText : AppColors.lightText,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    'Tap to add a car, bike or any vehicle',
+                    style: GoogleFonts.inter(
+                      fontSize: 12,
+                      color: isDark
+                          ? AppColors.darkTextSub
+                          : AppColors.lightTextSub,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(
+              Icons.arrow_forward_ios_rounded,
+              size: 14,
+              color: AppColors.emerald,
+            ),
+          ],
         ),
       ),
     );

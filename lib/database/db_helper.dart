@@ -6,6 +6,7 @@ import '../models/user_model.dart';
 import '../models/vehicle_model.dart';
 import '../models/quota_model.dart';
 import '../models/topup_model.dart';
+import '../models/fuel_log_model.dart';
 import '../services/quota_service.dart';
 
 class DbHelper {
@@ -16,12 +17,13 @@ class DbHelper {
   static Database? _database;
 
   static const String _dbName = 'fuelix.db';
-  static const int _dbVersion = 7;
+  static const int _dbVersion = 8; // bumped for fuel_logs table
   static const String _usersTable = 'users';
   static const String _vehiclesTable = 'vehicles';
   static const String _quotasTable = 'fuel_quotas';
   static const String _walletTable = 'wallets';
   static const String _topupTable = 'topup_transactions';
+  static const String _fuelLogsTable = 'fuel_logs';
 
   Future<Database> get database async {
     _database ??= await _initDb();
@@ -65,6 +67,7 @@ class DbHelper {
     await _createQuotasTable(db);
     await _createWalletTable(db);
     await _createTopupTable(db);
+    await _createFuelLogsTable(db);
   }
 
   Future<void> _createVehiclesTable(Database db) async {
@@ -128,6 +131,26 @@ class DbHelper {
     ''');
   }
 
+  Future<void> _createFuelLogsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $_fuelLogsTable (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id         INTEGER NOT NULL,
+        vehicle_id      INTEGER NOT NULL,
+        litres          REAL    NOT NULL,
+        odometer_km     REAL    NOT NULL DEFAULT 0.0,
+        fuel_type       TEXT    NOT NULL,
+        price_per_litre REAL    NOT NULL DEFAULT 0.0,
+        total_cost      REAL    NOT NULL DEFAULT 0.0,
+        station_name    TEXT    NOT NULL DEFAULT '',
+        notes           TEXT    NOT NULL DEFAULT '',
+        logged_at       TEXT    NOT NULL,
+        FOREIGN KEY (user_id)    REFERENCES $_usersTable(id)    ON DELETE CASCADE,
+        FOREIGN KEY (vehicle_id) REFERENCES $_vehiclesTable(id) ON DELETE CASCADE
+      )
+    ''');
+  }
+
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
       await db.execute(
@@ -176,6 +199,9 @@ class DbHelper {
       await _createWalletTable(db);
       await _createTopupTable(db);
     }
+    if (oldVersion < 8) {
+      await _createFuelLogsTable(db);
+    }
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -192,7 +218,6 @@ class DbHelper {
           ..remove('id'),
         conflictAlgorithm: ConflictAlgorithm.fail,
       );
-      // Initialise wallet for new user
       await db.insert(_walletTable, {
         'user_id': id,
         'balance': 0.0,
@@ -254,6 +279,16 @@ class DbHelper {
       limit: 1,
     );
     return r.isNotEmpty ? UserModel.fromMap(r.first) : null;
+  }
+
+  Future<int> updateUser(UserModel user) async {
+    final db = await database;
+    return db.update(
+      _usersTable,
+      user.toMap(),
+      where: 'id = ?',
+      whereArgs: [user.id],
+    );
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -403,8 +438,6 @@ class DbHelper {
   // ══════════════════════════════════════════════════════════════════════════
   // WALLET CRUD
   // ══════════════════════════════════════════════════════════════════════════
-
-  /// Get or auto-create wallet for [userId].
   Future<WalletModel> getWallet(int userId) async {
     final db = await database;
     final r = await db.query(
@@ -414,7 +447,6 @@ class DbHelper {
       limit: 1,
     );
     if (r.isNotEmpty) return WalletModel.fromMap(r.first);
-    // Auto-create if missing (for users created before v7)
     final wallet = WalletModel(
       userId: userId,
       balance: 0.0,
@@ -431,8 +463,6 @@ class DbHelper {
   // ══════════════════════════════════════════════════════════════════════════
   // TOPUP TRANSACTIONS
   // ══════════════════════════════════════════════════════════════════════════
-
-  /// Process a top-up: add to wallet balance + record transaction atomically.
   Future<TopUpTransactionModel?> processTopUp({
     required int userId,
     required double amount,
@@ -443,7 +473,6 @@ class DbHelper {
     TopUpTransactionModel? result;
 
     await db.transaction((txn) async {
-      // Ensure wallet exists
       final walletRows = await txn.query(
         _walletTable,
         where: 'user_id = ?',
@@ -480,7 +509,6 @@ class DbHelper {
         createdAt: DateTime.now(),
       );
       final id = await txn.insert(_topupTable, txn2.toMap()..remove('id'));
-      result = txn2..toMap(); // capture
       result = TopUpTransactionModel(
         id: id,
         userId: txn2.userId,
@@ -495,7 +523,6 @@ class DbHelper {
     return result;
   }
 
-  /// All top-up transactions for [userId], newest first.
   Future<List<TopUpTransactionModel>> getTopUpHistory(int userId) async {
     final db = await database;
     final r = await db.query(
@@ -507,12 +534,94 @@ class DbHelper {
     return r.map(TopUpTransactionModel.fromMap).toList();
   }
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // FUEL LOGS CRUD
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /// Insert a new fuel log. Returns the new row id, or -1 on failure.
+  Future<int> insertFuelLog(FuelLogModel log) async {
+    final db = await database;
+    try {
+      return await db.insert(
+        _fuelLogsTable,
+        log.toMap()..remove('id'),
+        conflictAlgorithm: ConflictAlgorithm.fail,
+      );
+    } catch (_) {
+      return -1;
+    }
+  }
+
+  /// All fuel logs for a user, newest first.
+  Future<List<FuelLogModel>> getFuelLogsByUser(int userId, {int? limit}) async {
+    final db = await database;
+    final r = await db.query(
+      _fuelLogsTable,
+      where: 'user_id = ?',
+      whereArgs: [userId],
+      orderBy: 'logged_at DESC',
+      limit: limit,
+    );
+    return r.map(FuelLogModel.fromMap).toList();
+  }
+
+  /// Fuel logs for a specific vehicle, newest first.
+  Future<List<FuelLogModel>> getFuelLogsByVehicle(
+    int vehicleId, {
+    int? limit,
+  }) async {
+    final db = await database;
+    final r = await db.query(
+      _fuelLogsTable,
+      where: 'vehicle_id = ?',
+      whereArgs: [vehicleId],
+      orderBy: 'logged_at DESC',
+      limit: limit,
+    );
+    return r.map(FuelLogModel.fromMap).toList();
+  }
+
+  /// Delete a fuel log entry.
+  Future<int> deleteFuelLog(int id) async {
+    final db = await database;
+    return db.delete(_fuelLogsTable, where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Aggregate stats for a user: total logs, total litres, total km.
+  Future<Map<String, double>> getFuelLogStats(int userId) async {
+    final db = await database;
+    final r = await db.rawQuery(
+      '''
+      SELECT
+        COUNT(*)         AS total_logs,
+        SUM(litres)      AS total_litres,
+        MAX(odometer_km) AS max_odometer,
+        MIN(odometer_km) AS min_odometer
+      FROM $_fuelLogsTable
+      WHERE user_id = ?
+    ''',
+      [userId],
+    );
+    if (r.isEmpty) return {'total_logs': 0, 'total_litres': 0, 'total_km': 0};
+    final row = r.first;
+    final totalLogs = (row['total_logs'] as num?)?.toDouble() ?? 0;
+    final totalLitres = (row['total_litres'] as num?)?.toDouble() ?? 0;
+    final maxOdo = (row['max_odometer'] as num?)?.toDouble() ?? 0;
+    final minOdo = (row['min_odometer'] as num?)?.toDouble() ?? 0;
+    final totalKm = maxOdo > minOdo ? maxOdo - minOdo : 0.0;
+    return {
+      'total_logs': totalLogs,
+      'total_litres': totalLitres,
+      'total_km': totalKm,
+    };
+  }
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
   String _generateRef() {
     final now = DateTime.now();
     return 'FX${now.millisecondsSinceEpoch.toRadixString(36).toUpperCase()}';
   }
 
-  // ── Close ──────────────────────────────────────────────────────────────────
   Future<void> close() async {
     final db = _database;
     if (db != null) {
