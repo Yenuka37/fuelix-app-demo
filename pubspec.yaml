@@ -18,6 +18,9 @@ dependencies:
   qr_flutter: ^4.1.0
   shared_preferences: ^2.2.2
 
+  # ---------- Server connect -------------
+  http: ^1.1.0
+
   # ---------- Fuel Screen ----------------
   flutter_map: ^6.1.0
   latlong2: ^0.9.0

@@ -3,8 +3,9 @@ import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import '../database/db_helper.dart';
 import '../models/user_model.dart';
-import '../widgets/custom_button.dart';
+import '../services/api_service.dart';
 import '../services/tutorial_service.dart';
+import '../widgets/custom_button.dart';
 import 'onboarding_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -20,6 +21,7 @@ class _LoginScreenState extends State<LoginScreen>
   final _nicController = TextEditingController();
   final _passwordController = TextEditingController();
   final _db = DbHelper();
+  final _apiService = ApiService();
 
   bool _isLoading = false;
   late AnimationController _fadeController;
@@ -58,23 +60,54 @@ class _LoginScreenState extends State<LoginScreen>
     setState(() => _isLoading = true);
 
     try {
-      final UserModel? user = await _db.validateLogin(
+      final result = await _apiService.login(
         _nicController.text.trim().toUpperCase(),
         _passwordController.text,
       );
 
       if (!mounted) return;
 
-      if (user != null) {
+      if (result['success']) {
+        final userData = result['data'];
+
+        // Create UserModel from API response
+        final user = UserModel(
+          id: userData['id'],
+          firstName: userData['firstName'],
+          lastName: userData['lastName'],
+          nic: userData['nic'],
+          mobile: userData['mobile'],
+          addressLine1: userData['addressLine1'] ?? '',
+          addressLine2: userData['addressLine2'] ?? '',
+          addressLine3: userData['addressLine3'] ?? '',
+          district: userData['district'] ?? '',
+          province: userData['province'] ?? '',
+          postalCode: userData['postalCode'] ?? '',
+          email: userData['email'],
+          password: _passwordController.text,
+          createdAt: userData['createdAt'] != null
+              ? DateTime.tryParse(userData['createdAt'])
+              : null,
+        );
+
+        // Check if user exists in local DB, if not, save them
+        final existingUser = await _db.getUserByNic(user.nic);
+        if (existingUser == null) {
+          await _db.insertUser(user);
+        } else {
+          // Update local user data if needed
+          await _db.updateUser(user);
+        }
+
         showAppSnackbar(
           context,
           message: 'Welcome back, ${user.firstName}!',
           isSuccess: true,
         );
+
         await Future.delayed(const Duration(milliseconds: 500));
         if (!mounted) return;
 
-        // First-time login → show onboarding, else go directly to home
         final onboardingSeen = await TutorialService.isSeen(
           TutorialKey.onboarding,
         );
@@ -89,11 +122,7 @@ class _LoginScreenState extends State<LoginScreen>
           Navigator.pushReplacementNamed(context, '/home', arguments: user);
         }
       } else {
-        showAppSnackbar(
-          context,
-          message: 'Invalid NIC or password. Please try again.',
-          isError: true,
-        );
+        showAppSnackbar(context, message: result['error'], isError: true);
       }
     } catch (e) {
       if (mounted) {

@@ -6,11 +6,10 @@ import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import '../database/db_helper.dart';
 import '../models/user_model.dart';
+import '../services/api_service.dart';
 import '../widgets/custom_button.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Sri Lanka data
-// ─────────────────────────────────────────────────────────────────────────────
 const List<String> _kProvinces = [
   'Western',
   'Central',
@@ -35,9 +34,6 @@ const Map<String, List<String>> _kDistrictsByProvince = {
   'Sabaragamuwa': ['Kegalle', 'Ratnapura'],
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Main SignupScreen
-// ─────────────────────────────────────────────────────────────────────────────
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
 
@@ -49,15 +45,16 @@ class _SignupScreenState extends State<SignupScreen>
     with TickerProviderStateMixin {
   final _pageController = PageController();
   final _db = DbHelper();
+  final _apiService = ApiService();
 
-  // ── Step 1 ─────────────────────────────────────────────────────────────────
+  // Step 1
   final _firstNameCtrl = TextEditingController();
   final _lastNameCtrl = TextEditingController();
   final _nicCtrl = TextEditingController();
   final _mobileCtrl = TextEditingController();
   final _formKey1 = GlobalKey<FormState>();
 
-  // ── Step 2 ─────────────────────────────────────────────────────────────────
+  // Step 2
   final _addr1Ctrl = TextEditingController();
   final _addr2Ctrl = TextEditingController();
   final _addr3Ctrl = TextEditingController();
@@ -66,14 +63,13 @@ class _SignupScreenState extends State<SignupScreen>
   String? _selectedDistrict;
   final _formKey2 = GlobalKey<FormState>();
 
-  // ── Step 3 ─────────────────────────────────────────────────────────────────
+  // Step 3
   final _emailCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
   final _confirmPassCtrl = TextEditingController();
   final _formKey3 = GlobalKey<FormState>();
 
-  // ── Step 4 – OTP ───────────────────────────────────────────────────────────
-  // otpPhase: 0=mobile pending, 1=email pending, 2=complete
+  // Step 4 – OTP
   int _otpPhase = 0;
   String _mobileOtp = '';
   String _emailOtp = '';
@@ -117,7 +113,6 @@ class _SignupScreenState extends State<SignupScreen>
     super.dispose();
   }
 
-  // ── Navigation helpers ─────────────────────────────────────────────────────
   void _goBack() {
     if (_currentPage > 0) {
       setState(() => _currentPage--);
@@ -138,62 +133,30 @@ class _SignupScreenState extends State<SignupScreen>
     );
   }
 
-  // ── Step 1 validate ────────────────────────────────────────────────────────
+  // Step 1 validate
   Future<void> _step1Next() async {
     if (!_formKey1.currentState!.validate()) return;
 
     setState(() => _isLoading = true);
-    final nicExists = await _db.nicExists(_nicCtrl.text.trim().toUpperCase());
-    final mobileExists = await _db.mobileExists(_mobileCtrl.text.trim());
+    await Future.delayed(const Duration(milliseconds: 500));
     setState(() => _isLoading = false);
-    if (!mounted) return;
-
-    if (nicExists) {
-      showAppSnackbar(
-        context,
-        message: 'This NIC is already registered.',
-        isError: true,
-      );
-      return;
-    }
-    if (mobileExists) {
-      showAppSnackbar(
-        context,
-        message: 'This mobile number is already registered.',
-        isError: true,
-      );
-      return;
-    }
     _nextPage();
   }
 
-  // ── Step 2 validate ────────────────────────────────────────────────────────
+  // Step 2 validate
   void _step2Next() {
     if (!_formKey2.currentState!.validate()) return;
     _nextPage();
   }
 
-  // ── Step 3 validate ────────────────────────────────────────────────────────
+  // Step 3 validate
   Future<void> _step3Next() async {
     if (!_formKey3.currentState!.validate()) return;
 
     setState(() => _isLoading = true);
-    final emailExists = await _db.emailExists(
-      _emailCtrl.text.trim().toLowerCase(),
-    );
+    await Future.delayed(const Duration(milliseconds: 500));
     setState(() => _isLoading = false);
-    if (!mounted) return;
 
-    if (emailExists) {
-      showAppSnackbar(
-        context,
-        message: 'This email is already registered.',
-        isError: true,
-      );
-      return;
-    }
-
-    // Generate mobile OTP first — email OTP generated after mobile is verified
     _mobileOtp = _generateOtp();
     setState(() {
       _otpPhase = 0;
@@ -201,19 +164,16 @@ class _SignupScreenState extends State<SignupScreen>
       _emailVerified = false;
     });
 
-    // Demo: show OTP in snackbar (production → SMS gateway)
     showAppSnackbar(context, message: 'Mobile OTP sent → $_mobileOtp');
     _nextPage();
   }
 
-  // Called by _Step4 when mobile OTP is confirmed — generate & send email OTP
   void _onMobileVerified() {
     _emailOtp = _generateOtp();
     setState(() {
       _otpPhase = 1;
       _mobileVerified = true;
     });
-    // Demo: show OTP in snackbar (production → email gateway)
     showAppSnackbar(context, message: 'Email OTP sent → $_emailOtp');
   }
 
@@ -224,7 +184,6 @@ class _SignupScreenState extends State<SignupScreen>
     });
   }
 
-  // Resend current-phase OTP
   void _resendOtp() {
     if (_otpPhase == 0) {
       _mobileOtp = _generateOtp();
@@ -236,30 +195,47 @@ class _SignupScreenState extends State<SignupScreen>
     setState(() {});
   }
 
-  // ── Step 4 – final signup ──────────────────────────────────────────────────
   Future<void> _finalSignup() async {
     setState(() => _isLoading = true);
     try {
-      final user = UserModel(
-        firstName: _firstNameCtrl.text.trim(),
-        lastName: _lastNameCtrl.text.trim(),
-        nic: _nicCtrl.text.trim().toUpperCase(),
-        mobile: _mobileCtrl.text.trim(),
-        addressLine1: _addr1Ctrl.text.trim(),
-        addressLine2: _addr2Ctrl.text.trim(),
-        addressLine3: _addr3Ctrl.text.trim(),
-        district: _selectedDistrict ?? '',
-        province: _selectedProvince ?? '',
-        postalCode: _postalCtrl.text.trim(),
-        email: _emailCtrl.text.trim().toLowerCase(),
-        password: _passwordCtrl.text,
-        createdAt: DateTime.now(),
-      );
+      final userData = {
+        'firstName': _firstNameCtrl.text.trim(),
+        'lastName': _lastNameCtrl.text.trim(),
+        'nic': _nicCtrl.text.trim().toUpperCase(),
+        'mobile': _mobileCtrl.text.trim(),
+        'addressLine1': _addr1Ctrl.text.trim(),
+        'addressLine2': _addr2Ctrl.text.trim(),
+        'addressLine3': _addr3Ctrl.text.trim(),
+        'district': _selectedDistrict ?? '',
+        'province': _selectedProvince ?? '',
+        'postalCode': _postalCtrl.text.trim(),
+        'email': _emailCtrl.text.trim().toLowerCase(),
+        'password': _passwordCtrl.text,
+      };
 
-      final id = await _db.insertUser(user);
+      final result = await _apiService.signup(userData);
+
       if (!mounted) return;
 
-      if (id > 0) {
+      if (result['success']) {
+        final user = UserModel(
+          firstName: _firstNameCtrl.text.trim(),
+          lastName: _lastNameCtrl.text.trim(),
+          nic: _nicCtrl.text.trim().toUpperCase(),
+          mobile: _mobileCtrl.text.trim(),
+          addressLine1: _addr1Ctrl.text.trim(),
+          addressLine2: _addr2Ctrl.text.trim(),
+          addressLine3: _addr3Ctrl.text.trim(),
+          district: _selectedDistrict ?? '',
+          province: _selectedProvince ?? '',
+          postalCode: _postalCtrl.text.trim(),
+          email: _emailCtrl.text.trim().toLowerCase(),
+          password: _passwordCtrl.text,
+          createdAt: DateTime.now(),
+        );
+
+        await _db.insertUser(user);
+
         showAppSnackbar(
           context,
           message: 'Account created! Please sign in.',
@@ -268,15 +244,16 @@ class _SignupScreenState extends State<SignupScreen>
         await Future.delayed(const Duration(milliseconds: 700));
         if (mounted) Navigator.pushReplacementNamed(context, '/login');
       } else {
+        showAppSnackbar(context, message: result['error'], isError: true);
+      }
+    } catch (e) {
+      if (mounted) {
         showAppSnackbar(
           context,
-          message: 'Failed to create account. Try again.',
+          message: 'An error occurred. Please try again.',
           isError: true,
         );
       }
-    } catch (_) {
-      if (mounted)
-        showAppSnackbar(context, message: 'An error occurred.', isError: true);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -284,7 +261,6 @@ class _SignupScreenState extends State<SignupScreen>
 
   String _generateOtp() => (100000 + Random().nextInt(900000)).toString();
 
-  // ── Build ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -305,7 +281,6 @@ class _SignupScreenState extends State<SignupScreen>
             opacity: _fadeAnim,
             child: Column(
               children: [
-                // ── Top bar ─────────────────────────────────────────────────
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
                   child: Row(
@@ -321,13 +296,11 @@ class _SignupScreenState extends State<SignupScreen>
                   ),
                 ),
                 const SizedBox(height: 20),
-                // ── Step indicator ───────────────────────────────────────────
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 24),
                   child: _StepDots(current: _currentPage, total: 4),
                 ),
                 const SizedBox(height: 28),
-                // ── Pages ────────────────────────────────────────────────────
                 Expanded(
                   child: PageView(
                     controller: _pageController,
@@ -397,9 +370,163 @@ class _SignupScreenState extends State<SignupScreen>
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// STEP 1 – Personal Information
-// ═════════════════════════════════════════════════════════════════════════════
+// ============================================================================
+// Helper Widgets
+// ============================================================================
+
+class _BackBtn extends StatelessWidget {
+  final VoidCallback onTap;
+  final bool isDark;
+  const _BackBtn({required this.onTap, required this.isDark});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 42,
+        height: 42,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          color: isDark ? AppColors.darkSurfaceAlt : AppColors.lightSurfaceAlt,
+          border: Border.all(
+            color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+          ),
+        ),
+        child: Icon(
+          Icons.arrow_back_ios_new_rounded,
+          size: 16,
+          color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
+        ),
+      ),
+    );
+  }
+}
+
+class _StepBadge extends StatelessWidget {
+  final int current, total;
+  final bool isDark;
+  const _StepBadge({
+    required this.current,
+    required this.total,
+    required this.isDark,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        color: isDark ? AppColors.darkSurfaceAlt : AppColors.lightSurfaceAlt,
+        border: Border.all(
+          color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+        ),
+      ),
+      child: Text(
+        'Step $current of $total',
+        style: GoogleFonts.spaceGrotesk(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
+        ),
+      ),
+    );
+  }
+}
+
+class _StepDots extends StatelessWidget {
+  final int current, total;
+  const _StepDots({required this.current, required this.total});
+
+  static const _gradients = [
+    [AppColors.emerald, AppColors.ocean],
+    [AppColors.ocean, AppColors.emeraldLight],
+    [AppColors.amber, AppColors.emerald],
+    [Color(0xFF7C3AED), AppColors.ocean],
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: List.generate(total, (i) {
+        final isDone = i < current;
+        final isActive = i == current;
+        return Expanded(
+          child: Padding(
+            padding: EdgeInsets.only(right: i < total - 1 ? 6 : 0),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 350),
+              height: 4,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(2),
+                gradient: (isDone || isActive)
+                    ? LinearGradient(colors: _gradients[i % _gradients.length])
+                    : null,
+                color: (isDone || isActive)
+                    ? null
+                    : (Theme.of(context).brightness == Brightness.dark
+                          ? AppColors.darkBorder
+                          : AppColors.lightBorder),
+              ),
+            ),
+          ),
+        );
+      }),
+    );
+  }
+}
+
+class _StepHeader extends StatelessWidget {
+  final IconData icon;
+  final String title, subtitle;
+  final List<Color> gradient;
+
+  const _StepHeader({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.gradient,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          width: 52,
+          height: 52,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            gradient: LinearGradient(
+              colors: gradient,
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+          ),
+          child: Icon(icon, color: Colors.white, size: 24),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: Theme.of(context).textTheme.headlineSmall),
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                style: Theme.of(context).textTheme.bodySmall,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _Step1 extends StatelessWidget {
   final TextEditingController firstNameCtrl, lastNameCtrl, nicCtrl, mobileCtrl;
   final GlobalKey<FormState> formKey;
@@ -520,9 +647,6 @@ class _Step1 extends StatelessWidget {
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// STEP 2 – Address Information
-// ═════════════════════════════════════════════════════════════════════════════
 class _Step2 extends StatelessWidget {
   final TextEditingController addr1Ctrl, addr2Ctrl, addr3Ctrl, postalCtrl;
   final String? province, district;
@@ -552,11 +676,6 @@ class _Step2 extends StatelessWidget {
         ? (_kDistrictsByProvince[province!] ?? <String>[])
         : <String>[];
 
-    final borderColor = isDark ? AppColors.darkBorder : AppColors.lightBorder;
-    final fillColor = isDark ? AppColors.darkSurface : AppColors.lightSurface;
-    final labelColor = isDark ? AppColors.darkTextSub : AppColors.lightTextSub;
-    final textColor = isDark ? AppColors.darkText : AppColors.lightText;
-
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
       padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -574,7 +693,6 @@ class _Step2 extends StatelessWidget {
             key: formKey,
             child: Column(
               children: [
-                // Address line 1
                 AppTextField(
                   label: 'Address Line 1',
                   hint: 'House No / Street',
@@ -588,7 +706,6 @@ class _Step2 extends StatelessWidget {
                   },
                 ),
                 const SizedBox(height: 14),
-                // Address line 2 (optional)
                 AppTextField(
                   label: 'Address Line 2 (optional)',
                   hint: 'Village / Town',
@@ -597,7 +714,6 @@ class _Step2 extends StatelessWidget {
                   textCapitalization: TextCapitalization.words,
                 ),
                 const SizedBox(height: 14),
-                // Address line 3 (optional)
                 AppTextField(
                   label: 'Address Line 3 (optional)',
                   hint: 'Area / Suburb',
@@ -606,7 +722,6 @@ class _Step2 extends StatelessWidget {
                   textCapitalization: TextCapitalization.words,
                 ),
                 const SizedBox(height: 14),
-                // Province dropdown
                 _AppDropdown(
                   label: 'Province',
                   value: province,
@@ -617,7 +732,6 @@ class _Step2 extends StatelessWidget {
                   validator: (v) => v == null ? 'Select a province' : null,
                 ),
                 const SizedBox(height: 14),
-                // District dropdown
                 _AppDropdown(
                   label: 'District',
                   value: district,
@@ -631,7 +745,6 @@ class _Step2 extends StatelessWidget {
                       : 'Select district',
                 ),
                 const SizedBox(height: 14),
-                // Postal code
                 AppTextField(
                   label: 'Postal Code',
                   hint: '00100',
@@ -666,9 +779,6 @@ class _Step2 extends StatelessWidget {
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// STEP 3 – Account Information
-// ═════════════════════════════════════════════════════════════════════════════
 class _Step3 extends StatelessWidget {
   final TextEditingController emailCtrl, passwordCtrl, confirmPassCtrl;
   final GlobalKey<FormState> formKey;
@@ -749,7 +859,6 @@ class _Step3 extends StatelessWidget {
                   },
                 ),
                 const SizedBox(height: 16),
-                // Password hint box
                 Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
@@ -796,12 +905,9 @@ class _Step3 extends StatelessWidget {
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// STEP 4 – Sequential OTP Verification  (mobile first → then email)
-// ═════════════════════════════════════════════════════════════════════════════
 class _Step4 extends StatefulWidget {
   final String mobile, email, mobileOtp, emailOtp;
-  final int otpPhase; // 0=mobile, 1=email, 2=done
+  final int otpPhase;
   final bool mobileVerified, emailVerified, isDark, isLoading;
   final VoidCallback onMobileVerified, onEmailVerified, onResend, onSubmit;
 
@@ -828,10 +934,6 @@ class _Step4 extends StatefulWidget {
 class _Step4State extends State<_Step4> {
   final _mobileOtpCtrl = TextEditingController();
   final _emailOtpCtrl = TextEditingController();
-
-  // Resend cooldown — shared for both phases
-  // Resend interval: 60 s (1st resend), 90 s (2nd), 120 s (3rd+)
-  static const _intervals = [60, 90, 120];
   int _resendCount = 0;
   int _secondsLeft = 60;
   bool _canResend = false;
@@ -846,7 +948,6 @@ class _Step4State extends State<_Step4> {
   @override
   void didUpdateWidget(_Step4 old) {
     super.didUpdateWidget(old);
-    // When phase changes (mobile done → email phase) restart countdown
     if (old.otpPhase != widget.otpPhase) {
       _resendCount = 0;
       _emailOtpCtrl.clear();
@@ -880,23 +981,14 @@ class _Step4State extends State<_Step4> {
   void _handleResend() {
     if (!_canResend) return;
     widget.onResend();
-    // Clear the input for the current phase
     if (widget.otpPhase == 0) _mobileOtpCtrl.clear();
     if (widget.otpPhase == 1) _emailOtpCtrl.clear();
     _resendCount++;
-    final next = _intervals[_resendCount.clamp(0, _intervals.length - 1)];
+    const intervals = [60, 90, 120];
+    final next = intervals[_resendCount.clamp(0, intervals.length - 1)];
     _startCountdown(next);
   }
 
-  @override
-  void dispose() {
-    _timer?.cancel();
-    _mobileOtpCtrl.dispose();
-    _emailOtpCtrl.dispose();
-    super.dispose();
-  }
-
-  // ── Verify helpers ─────────────────────────────────────────────────────────
   void _verifyMobile() {
     final entered = _mobileOtpCtrl.text.trim();
     if (entered.length != 6) {
@@ -904,7 +996,7 @@ class _Step4State extends State<_Step4> {
       return;
     }
     if (entered == widget.mobileOtp) {
-      widget.onMobileVerified(); // triggers email OTP generation
+      widget.onMobileVerified();
     } else {
       showAppSnackbar(
         context,
@@ -931,10 +1023,16 @@ class _Step4State extends State<_Step4> {
     }
   }
 
-  // ── Build ──────────────────────────────────────────────────────────────────
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _mobileOtpCtrl.dispose();
+    _emailOtpCtrl.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    final isDark = widget.isDark;
     final phase = widget.otpPhase;
 
     return SingleChildScrollView(
@@ -954,12 +1052,8 @@ class _Step4State extends State<_Step4> {
             gradient: [const Color(0xFF7C3AED), AppColors.ocean],
           ),
           const SizedBox(height: 28),
-
-          // ── Phase progress bar ───────────────────────────────────────────
-          _PhaseProgress(phase: phase, isDark: isDark),
+          _PhaseProgress(phase: phase, isDark: widget.isDark),
           const SizedBox(height: 24),
-
-          // ── Mobile OTP card ──────────────────────────────────────────────
           _OtpCard(
             icon: Icons.phone_outlined,
             type: 'Mobile',
@@ -967,13 +1061,11 @@ class _Step4State extends State<_Step4> {
             controller: _mobileOtpCtrl,
             isVerified: widget.mobileVerified,
             isActive: phase == 0,
-            isDark: isDark,
+            isDark: widget.isDark,
             onVerify: _verifyMobile,
             accentColor: AppColors.emerald,
           ),
           const SizedBox(height: 14),
-
-          // ── Email OTP card (locked until mobile is done) ─────────────────
           _OtpCard(
             icon: Icons.email_outlined,
             type: 'Email',
@@ -982,27 +1074,22 @@ class _Step4State extends State<_Step4> {
             isVerified: widget.emailVerified,
             isActive: phase == 1,
             isLocked: phase == 0,
-            isDark: isDark,
+            isDark: widget.isDark,
             onVerify: _verifyEmail,
             accentColor: AppColors.ocean,
           ),
           const SizedBox(height: 24),
-
-          // ── Resend row ───────────────────────────────────────────────────
           if (phase < 2)
             _ResendRow(
               canResend: _canResend,
               secondsLeft: _secondsLeft,
               resendCount: _resendCount,
-              isDark: isDark,
+              isDark: widget.isDark,
               onResend: _handleResend,
             ),
-
           if (phase < 2) const SizedBox(height: 28),
-
-          // ── Create Account (only when both verified) ─────────────────────
           if (phase == 2) ...[
-            _AllVerifiedBanner(isDark: isDark),
+            _AllVerifiedBanner(isDark: widget.isDark),
             const SizedBox(height: 24),
             GradientButton(
               label: 'Create Account',
@@ -1035,9 +1122,8 @@ class _Step4State extends State<_Step4> {
   }
 }
 
-// ─── Phase Progress ───────────────────────────────────────────────────────────
 class _PhaseProgress extends StatelessWidget {
-  final int phase; // 0=mobile, 1=email, 2=done
+  final int phase;
   final bool isDark;
   const _PhaseProgress({required this.phase, required this.isDark});
 
@@ -1176,7 +1262,6 @@ class _PhaseConnector extends StatelessWidget {
   }
 }
 
-// ─── OTP Card ─────────────────────────────────────────────────────────────────
 class _OtpCard extends StatelessWidget {
   final IconData icon;
   final String type, maskedTarget;
@@ -1241,7 +1326,6 @@ class _OtpCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Header ──────────────────────────────────────────────────
             Row(
               children: [
                 Container(
@@ -1296,15 +1380,12 @@ class _OtpCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                // Status badge
                 if (isVerified)
                   _VerifiedBadge()
                 else if (isActive)
                   _PendingBadge(color: accentColor),
               ],
             ),
-
-            // ── OTP input (only when active & not verified) ──────────────
             if (isActive && !isVerified) ...[
               const SizedBox(height: 14),
               Row(
@@ -1423,7 +1504,6 @@ class _PendingBadge extends StatelessWidget {
   }
 }
 
-// ─── OTP Input Field ──────────────────────────────────────────────────────────
 class _OtpInputField extends StatelessWidget {
   final TextEditingController controller;
   final bool isDark;
@@ -1483,7 +1563,6 @@ class _OtpInputField extends StatelessWidget {
   }
 }
 
-// ─── Resend Row ───────────────────────────────────────────────────────────────
 class _ResendRow extends StatelessWidget {
   final bool canResend, isDark;
   final int secondsLeft, resendCount;
@@ -1565,7 +1644,6 @@ class _ResendRow extends StatelessWidget {
   }
 }
 
-// ─── All Verified Banner ──────────────────────────────────────────────────────
 class _AllVerifiedBanner extends StatelessWidget {
   final bool isDark;
   const _AllVerifiedBanner({required this.isDark});
@@ -1623,168 +1701,6 @@ class _AllVerifiedBanner extends StatelessWidget {
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// Shared UI helpers
-// ═════════════════════════════════════════════════════════════════════════════
-
-// ─── Step Header ──────────────────────────────────────────────────────────────
-class _StepHeader extends StatelessWidget {
-  final IconData icon;
-  final String title, subtitle;
-  final List<Color> gradient;
-
-  const _StepHeader({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.gradient,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Container(
-          width: 52,
-          height: 52,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            gradient: LinearGradient(
-              colors: gradient,
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-          ),
-          child: Icon(icon, color: Colors.white, size: 24),
-        ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(title, style: Theme.of(context).textTheme.headlineSmall),
-              const SizedBox(height: 2),
-              Text(
-                subtitle,
-                style: Theme.of(context).textTheme.bodySmall,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ─── Step Badge ───────────────────────────────────────────────────────────────
-class _StepBadge extends StatelessWidget {
-  final int current, total;
-  final bool isDark;
-  const _StepBadge({
-    required this.current,
-    required this.total,
-    required this.isDark,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        color: isDark ? AppColors.darkSurfaceAlt : AppColors.lightSurfaceAlt,
-        border: Border.all(
-          color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-        ),
-      ),
-      child: Text(
-        'Step $current of $total',
-        style: GoogleFonts.spaceGrotesk(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Step Dots (segmented bar) ────────────────────────────────────────────────
-class _StepDots extends StatelessWidget {
-  final int current, total;
-  const _StepDots({required this.current, required this.total});
-
-  static const _gradients = [
-    [AppColors.emerald, AppColors.ocean],
-    [AppColors.ocean, AppColors.emeraldLight],
-    [AppColors.amber, AppColors.emerald],
-    [Color(0xFF7C3AED), AppColors.ocean],
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: List.generate(total, (i) {
-        final isDone = i < current;
-        final isActive = i == current;
-        return Expanded(
-          child: Padding(
-            padding: EdgeInsets.only(right: i < total - 1 ? 6 : 0),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 350),
-              height: 4,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(2),
-                gradient: (isDone || isActive)
-                    ? LinearGradient(colors: _gradients[i % _gradients.length])
-                    : null,
-                color: (isDone || isActive)
-                    ? null
-                    : (Theme.of(context).brightness == Brightness.dark
-                          ? AppColors.darkBorder
-                          : AppColors.lightBorder),
-              ),
-            ),
-          ),
-        );
-      }),
-    );
-  }
-}
-
-// ─── Back Button ──────────────────────────────────────────────────────────────
-class _BackBtn extends StatelessWidget {
-  final VoidCallback onTap;
-  final bool isDark;
-  const _BackBtn({required this.onTap, required this.isDark});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 42,
-        height: 42,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          color: isDark ? AppColors.darkSurfaceAlt : AppColors.lightSurfaceAlt,
-          border: Border.all(
-            color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-          ),
-        ),
-        child: Icon(
-          Icons.arrow_back_ios_new_rounded,
-          size: 16,
-          color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Dropdown ─────────────────────────────────────────────────────────────────
 class _AppDropdown extends StatelessWidget {
   final String label;
   final String? value;
