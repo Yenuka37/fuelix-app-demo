@@ -1,0 +1,74 @@
+{
+  "countries": [
+    {
+      "code": "+94",
+      "name": "Sri Lanka",
+      "flag": "🇱🇰",
+      "dialCode": "94",
+      "format": "XXX-XXXXXX"
+    },
+    {
+      "code": "+1",
+      "name": "USA/Canada",
+      "flag": "🇺🇸",
+      "dialCode": "1",
+      "format": "XXX-XXX-XXXX"
+    },
+    {
+      "code": "+44",
+      "name": "United Kingdom",
+      "flag": "🇬🇧",
+      "dialCode": "44",
+      "format": "XXXX-XXXXXX"
+    },
+    {
+      "code": "+91",
+      "name": "India",
+      "flag": "🇮🇳",
+      "dialCode": "91",
+      "format": "XXXXX-XXXXX"
+    },
+    {
+      "code": "+61",
+      "name": "Australia",
+      "flag": "🇦🇺",
+      "dialCode": "61",
+      "format": "X XXXX XXXX"
+    },
+    {
+      "code": "+86",
+      "name": "China",
+      "flag": "🇨🇳",
+      "dialCode": "86",
+      "format": "XXX-XXXX-XXXX"
+    },
+    {
+      "code": "+81",
+      "name": "Japan",
+      "flag": "🇯🇵",
+      "dialCode": "81",
+      "format": "XX-XXXX-XXXX"
+    },
+    {
+      "code": "+49",
+      "name": "Germany",
+      "flag": "🇩🇪",
+      "dialCode": "49",
+      "format": "XXXX-XXXXXXX"
+    },
+    {
+      "code": "+33",
+      "name": "France",
+      "flag": "🇫🇷",
+      "dialCode": "33",
+      "format": "X XX XX XX XX"
+    },
+    {
+      "code": "+971",
+      "name": "UAE",
+      "flag": "🇦🇪",
+      "dialCode": "971",
+      "format": "XX-XXX-XXXX"
+    }
+  ]
+}

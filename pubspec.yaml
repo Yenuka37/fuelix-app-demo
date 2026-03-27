@@ -28,6 +28,9 @@ dependencies:
   geocoding: ^2.1.1
   url_launcher: ^6.2.5
 
+  # ---------- Signup ---------------------
+  country_code_picker: ^3.0.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -37,3 +40,5 @@ flutter:
   uses-material-design: true
   assets:
     - assets/data/stations_db.json
+    - assets/data/provinces.json
+    - assets/data/country_codes.json

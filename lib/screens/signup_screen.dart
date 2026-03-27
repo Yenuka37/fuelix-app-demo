@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -47,14 +46,14 @@ class _SignupScreenState extends State<SignupScreen>
   final _db = DbHelper();
   final _apiService = ApiService();
 
-  // Step 1
+  // Step 1 - Personal Info
   final _firstNameCtrl = TextEditingController();
   final _lastNameCtrl = TextEditingController();
   final _nicCtrl = TextEditingController();
   final _mobileCtrl = TextEditingController();
   final _formKey1 = GlobalKey<FormState>();
 
-  // Step 2
+  // Step 2 - Address
   final _addr1Ctrl = TextEditingController();
   final _addr2Ctrl = TextEditingController();
   final _addr3Ctrl = TextEditingController();
@@ -63,18 +62,30 @@ class _SignupScreenState extends State<SignupScreen>
   String? _selectedDistrict;
   final _formKey2 = GlobalKey<FormState>();
 
-  // Step 3
+  // Step 3 - Account
   final _emailCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
   final _confirmPassCtrl = TextEditingController();
   final _formKey3 = GlobalKey<FormState>();
 
-  // Step 4 – OTP
-  int _otpPhase = 0;
-  String _mobileOtp = '';
-  String _emailOtp = '';
+  // OTP Controllers
+  final _mobileOtpCtrl = TextEditingController();
+  final _emailOtpCtrl = TextEditingController();
+
+  // OTP State
+  int _otpPhase = 0; // 0=mobile, 1=email, 2=done
   bool _mobileVerified = false;
   bool _emailVerified = false;
+  bool _sendingMobileOtp = false;
+  bool _sendingEmailOtp = false;
+  bool _verifyingMobileOtp = false;
+  bool _verifyingEmailOtp = false;
+
+  // Resend cooldown
+  int _mobileResendSeconds = 0;
+  int _emailResendSeconds = 0;
+  Timer? _mobileTimer;
+  Timer? _emailTimer;
 
   int _currentPage = 0;
   bool _isLoading = false;
@@ -109,6 +120,10 @@ class _SignupScreenState extends State<SignupScreen>
     _emailCtrl.dispose();
     _passwordCtrl.dispose();
     _confirmPassCtrl.dispose();
+    _mobileOtpCtrl.dispose();
+    _emailOtpCtrl.dispose();
+    _mobileTimer?.cancel();
+    _emailTimer?.cancel();
     _fadeCtrl.dispose();
     super.dispose();
   }
@@ -136,10 +151,6 @@ class _SignupScreenState extends State<SignupScreen>
   // Step 1 validate
   Future<void> _step1Next() async {
     if (!_formKey1.currentState!.validate()) return;
-
-    setState(() => _isLoading = true);
-    await Future.delayed(const Duration(milliseconds: 500));
-    setState(() => _isLoading = false);
     _nextPage();
   }
 
@@ -149,60 +160,202 @@ class _SignupScreenState extends State<SignupScreen>
     _nextPage();
   }
 
-  // Step 3 validate
+  // Step 3 validate and send OTP
   Future<void> _step3Next() async {
     if (!_formKey3.currentState!.validate()) return;
-
-    setState(() => _isLoading = true);
-    await Future.delayed(const Duration(milliseconds: 500));
-    setState(() => _isLoading = false);
-
-    _mobileOtp = _generateOtp();
-    setState(() {
-      _otpPhase = 0;
-      _mobileVerified = false;
-      _emailVerified = false;
-    });
-
-    showAppSnackbar(context, message: 'Mobile OTP sent → $_mobileOtp');
-    _nextPage();
+    await _sendMobileOTP();
+    // Don't navigate automatically - wait for verification
   }
 
-  void _onMobileVerified() {
-    _emailOtp = _generateOtp();
-    setState(() {
-      _otpPhase = 1;
-      _mobileVerified = true;
-    });
-    showAppSnackbar(context, message: 'Email OTP sent → $_emailOtp');
-  }
+  // Send Mobile OTP
+  Future<void> _sendMobileOTP() async {
+    setState(() => _sendingMobileOtp = true);
 
-  void _onEmailVerified() {
-    setState(() {
-      _otpPhase = 2;
-      _emailVerified = true;
-    });
-  }
+    final result = await _apiService.sendMobileOTP(_mobileCtrl.text.trim());
 
-  void _resendOtp() {
-    if (_otpPhase == 0) {
-      _mobileOtp = _generateOtp();
-      showAppSnackbar(context, message: 'Mobile OTP resent → $_mobileOtp');
-    } else if (_otpPhase == 1) {
-      _emailOtp = _generateOtp();
-      showAppSnackbar(context, message: 'Email OTP resent → $_emailOtp');
+    if (!mounted) return;
+
+    if (result['success']) {
+      setState(() {
+        _mobileResendSeconds = 60;
+        _otpPhase = 0;
+      });
+      _startMobileTimer();
+
+      showAppSnackbar(
+        context,
+        message: 'OTP sent to ${_maskMobile(_mobileCtrl.text.trim())}',
+        isSuccess: true,
+      );
+
+      // Navigate to step 4 only after OTP is sent
+      _nextPage();
+    } else {
+      showAppSnackbar(context, message: result['error'], isError: true);
     }
-    setState(() {});
+
+    setState(() => _sendingMobileOtp = false);
   }
 
+  // Verify Mobile OTP
+  Future<void> _verifyMobileOTP() async {
+    final otp = _mobileOtpCtrl.text.trim();
+    if (otp.length != 6) {
+      showAppSnackbar(context, message: 'Enter 6-digit OTP', isError: true);
+      return;
+    }
+
+    setState(() => _verifyingMobileOtp = true);
+
+    final result = await _apiService.verifyOTP(
+      _mobileCtrl.text.trim(),
+      otp,
+      'MOBILE',
+    );
+
+    if (!mounted) return;
+
+    if (result['success']) {
+      setState(() {
+        _mobileVerified = true;
+        _otpPhase = 1;
+      });
+
+      showAppSnackbar(
+        context,
+        message: 'Mobile verified! Sending email OTP...',
+        isSuccess: true,
+      );
+
+      // Send email OTP immediately
+      await _sendEmailOTP();
+    } else {
+      showAppSnackbar(context, message: result['error'], isError: true);
+    }
+
+    setState(() => _verifyingMobileOtp = false);
+  }
+
+  // Send Email OTP
+  Future<void> _sendEmailOTP() async {
+    setState(() => _sendingEmailOtp = true);
+
+    final result = await _apiService.sendEmailOTP(_emailCtrl.text.trim());
+
+    if (!mounted) return;
+
+    if (result['success']) {
+      setState(() {
+        _emailResendSeconds = 60;
+      });
+      _startEmailTimer();
+
+      showAppSnackbar(
+        context,
+        message: 'OTP sent to ${_maskEmail(_emailCtrl.text.trim())}',
+        isSuccess: true,
+      );
+    } else {
+      showAppSnackbar(context, message: result['error'], isError: true);
+    }
+
+    setState(() => _sendingEmailOtp = false);
+  }
+
+  // Verify Email OTP
+  Future<void> _verifyEmailOTP() async {
+    final otp = _emailOtpCtrl.text.trim();
+    if (otp.length != 6) {
+      showAppSnackbar(context, message: 'Enter 6-digit OTP', isError: true);
+      return;
+    }
+
+    setState(() => _verifyingEmailOtp = true);
+
+    final result = await _apiService.verifyOTP(
+      _emailCtrl.text.trim(),
+      otp,
+      'EMAIL',
+    );
+
+    if (!mounted) return;
+
+    if (result['success']) {
+      setState(() {
+        _emailVerified = true;
+        _otpPhase = 2;
+      });
+
+      showAppSnackbar(
+        context,
+        message: 'Email verified successfully!',
+        isSuccess: true,
+      );
+    } else {
+      showAppSnackbar(context, message: result['error'], isError: true);
+    }
+
+    setState(() => _verifyingEmailOtp = false);
+  }
+
+  // Resend Mobile OTP
+  Future<void> _resendMobileOTP() async {
+    if (_mobileResendSeconds > 0) return;
+    _mobileOtpCtrl.clear();
+    await _sendMobileOTP();
+  }
+
+  // Resend Email OTP
+  Future<void> _resendEmailOTP() async {
+    if (_emailResendSeconds > 0) return;
+    _emailOtpCtrl.clear();
+    await _sendEmailOTP();
+  }
+
+  // Start mobile resend timer
+  void _startMobileTimer() {
+    _mobileTimer?.cancel();
+    _mobileTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_mobileResendSeconds > 0) {
+        setState(() => _mobileResendSeconds--);
+      } else {
+        timer.cancel();
+      }
+    });
+  }
+
+  // Start email resend timer
+  void _startEmailTimer() {
+    _emailTimer?.cancel();
+    _emailTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_emailResendSeconds > 0) {
+        setState(() => _emailResendSeconds--);
+      } else {
+        timer.cancel();
+      }
+    });
+  }
+
+  // Final signup
   Future<void> _finalSignup() async {
+    if (!_mobileVerified || !_emailVerified) {
+      showAppSnackbar(
+        context,
+        message: 'Please verify both mobile and email first',
+        isError: true,
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
+
     try {
       final userData = {
         'firstName': _firstNameCtrl.text.trim(),
         'lastName': _lastNameCtrl.text.trim(),
         'nic': _nicCtrl.text.trim().toUpperCase(),
         'mobile': _mobileCtrl.text.trim(),
+        'mobileOtp': _mobileOtpCtrl.text.trim(),
         'addressLine1': _addr1Ctrl.text.trim(),
         'addressLine2': _addr2Ctrl.text.trim(),
         'addressLine3': _addr3Ctrl.text.trim(),
@@ -210,6 +363,7 @@ class _SignupScreenState extends State<SignupScreen>
         'province': _selectedProvince ?? '',
         'postalCode': _postalCtrl.text.trim(),
         'email': _emailCtrl.text.trim().toLowerCase(),
+        'emailOtp': _emailOtpCtrl.text.trim(),
         'password': _passwordCtrl.text,
       };
 
@@ -241,6 +395,7 @@ class _SignupScreenState extends State<SignupScreen>
           message: 'Account created! Please sign in.',
           isSuccess: true,
         );
+
         await Future.delayed(const Duration(milliseconds: 700));
         if (mounted) Navigator.pushReplacementNamed(context, '/login');
       } else {
@@ -259,7 +414,22 @@ class _SignupScreenState extends State<SignupScreen>
     }
   }
 
-  String _generateOtp() => (100000 + Random().nextInt(900000)).toString();
+  String _maskMobile(String m) {
+    if (m.length < 4) return m;
+    return '${m.substring(0, 3)}****${m.substring(m.length - 3)}';
+  }
+
+  String _maskEmail(String e) {
+    final parts = e.split('@');
+    if (parts.length != 2) return e;
+    final name = parts[0], domain = parts[1];
+    if (name.length <= 2) return '**@$domain';
+    return name[0] +
+        ('*' * (name.length - 2)) +
+        name[name.length - 1] +
+        '@' +
+        domain;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -346,16 +516,23 @@ class _SignupScreenState extends State<SignupScreen>
                       _Step4(
                         mobile: _mobileCtrl.text,
                         email: _emailCtrl.text,
-                        mobileOtp: _mobileOtp,
-                        emailOtp: _emailOtp,
+                        mobileOtpCtrl: _mobileOtpCtrl,
+                        emailOtpCtrl: _emailOtpCtrl,
                         otpPhase: _otpPhase,
                         mobileVerified: _mobileVerified,
                         emailVerified: _emailVerified,
+                        mobileResendSeconds: _mobileResendSeconds,
+                        emailResendSeconds: _emailResendSeconds,
+                        sendingMobileOtp: _sendingMobileOtp,
+                        sendingEmailOtp: _sendingEmailOtp,
+                        verifyingMobileOtp: _verifyingMobileOtp,
+                        verifyingEmailOtp: _verifyingEmailOtp,
                         isDark: isDark,
                         isLoading: _isLoading,
-                        onMobileVerified: _onMobileVerified,
-                        onEmailVerified: _onEmailVerified,
-                        onResend: _resendOtp,
+                        onVerifyMobileOtp: _verifyMobileOTP,
+                        onResendMobileOtp: _resendMobileOTP,
+                        onVerifyEmailOtp: _verifyEmailOTP,
+                        onResendEmailOtp: _resendEmailOTP,
                         onSubmit: _finalSignup,
                       ),
                     ],
@@ -890,7 +1067,7 @@ class _Step3 extends StatelessWidget {
                 ),
                 const SizedBox(height: 28),
                 GradientButton(
-                  label: 'Send OTP',
+                  label: 'Verify Mobile',
                   onPressed: onNext,
                   isLoading: isLoading,
                   colors: [AppColors.amber, AppColors.emerald],
@@ -905,204 +1082,41 @@ class _Step3 extends StatelessWidget {
   }
 }
 
-class _Step4 extends StatefulWidget {
-  final String mobile, email, mobileOtp, emailOtp;
+class _Step4 extends StatelessWidget {
+  final String mobile, email;
+  final TextEditingController mobileOtpCtrl, emailOtpCtrl;
   final int otpPhase;
-  final bool mobileVerified, emailVerified, isDark, isLoading;
-  final VoidCallback onMobileVerified, onEmailVerified, onResend, onSubmit;
+  final bool mobileVerified, emailVerified;
+  final int mobileResendSeconds, emailResendSeconds;
+  final bool sendingMobileOtp, sendingEmailOtp;
+  final bool verifyingMobileOtp, verifyingEmailOtp;
+  final bool isDark, isLoading;
+  final VoidCallback onVerifyMobileOtp, onResendMobileOtp;
+  final VoidCallback onVerifyEmailOtp, onResendEmailOtp;
+  final VoidCallback onSubmit;
 
   const _Step4({
     required this.mobile,
     required this.email,
-    required this.mobileOtp,
-    required this.emailOtp,
+    required this.mobileOtpCtrl,
+    required this.emailOtpCtrl,
     required this.otpPhase,
     required this.mobileVerified,
     required this.emailVerified,
+    required this.mobileResendSeconds,
+    required this.emailResendSeconds,
+    required this.sendingMobileOtp,
+    required this.sendingEmailOtp,
+    required this.verifyingMobileOtp,
+    required this.verifyingEmailOtp,
     required this.isDark,
     required this.isLoading,
-    required this.onMobileVerified,
-    required this.onEmailVerified,
-    required this.onResend,
+    required this.onVerifyMobileOtp,
+    required this.onResendMobileOtp,
+    required this.onVerifyEmailOtp,
+    required this.onResendEmailOtp,
     required this.onSubmit,
   });
-
-  @override
-  State<_Step4> createState() => _Step4State();
-}
-
-class _Step4State extends State<_Step4> {
-  final _mobileOtpCtrl = TextEditingController();
-  final _emailOtpCtrl = TextEditingController();
-  int _resendCount = 0;
-  int _secondsLeft = 60;
-  bool _canResend = false;
-  Timer? _timer;
-
-  @override
-  void initState() {
-    super.initState();
-    _startCountdown(60);
-  }
-
-  @override
-  void didUpdateWidget(_Step4 old) {
-    super.didUpdateWidget(old);
-    if (old.otpPhase != widget.otpPhase) {
-      _resendCount = 0;
-      _emailOtpCtrl.clear();
-      _startCountdown(60);
-    }
-  }
-
-  void _startCountdown(int seconds) {
-    _timer?.cancel();
-    setState(() {
-      _secondsLeft = seconds;
-      _canResend = false;
-    });
-    _timer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (!mounted) {
-        t.cancel();
-        return;
-      }
-      if (_secondsLeft > 1) {
-        setState(() => _secondsLeft--);
-      } else {
-        t.cancel();
-        setState(() {
-          _secondsLeft = 0;
-          _canResend = true;
-        });
-      }
-    });
-  }
-
-  void _handleResend() {
-    if (!_canResend) return;
-    widget.onResend();
-    if (widget.otpPhase == 0) _mobileOtpCtrl.clear();
-    if (widget.otpPhase == 1) _emailOtpCtrl.clear();
-    _resendCount++;
-    const intervals = [60, 90, 120];
-    final next = intervals[_resendCount.clamp(0, intervals.length - 1)];
-    _startCountdown(next);
-  }
-
-  void _verifyMobile() {
-    final entered = _mobileOtpCtrl.text.trim();
-    if (entered.length != 6) {
-      showAppSnackbar(context, message: 'Enter the 6-digit OTP', isError: true);
-      return;
-    }
-    if (entered == widget.mobileOtp) {
-      widget.onMobileVerified();
-    } else {
-      showAppSnackbar(
-        context,
-        message: 'Incorrect OTP. Try again.',
-        isError: true,
-      );
-    }
-  }
-
-  void _verifyEmail() {
-    final entered = _emailOtpCtrl.text.trim();
-    if (entered.length != 6) {
-      showAppSnackbar(context, message: 'Enter the 6-digit OTP', isError: true);
-      return;
-    }
-    if (entered == widget.emailOtp) {
-      widget.onEmailVerified();
-    } else {
-      showAppSnackbar(
-        context,
-        message: 'Incorrect OTP. Try again.',
-        isError: true,
-      );
-    }
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    _mobileOtpCtrl.dispose();
-    _emailOtpCtrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final phase = widget.otpPhase;
-
-    return SingleChildScrollView(
-      physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.symmetric(horizontal: 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _StepHeader(
-            icon: Icons.verified_outlined,
-            title: 'Verify Identity',
-            subtitle: phase == 0
-                ? 'Enter the OTP sent to your mobile'
-                : phase == 1
-                ? 'Mobile verified! Now check your email'
-                : 'Both channels verified ✓',
-            gradient: [const Color(0xFF7C3AED), AppColors.ocean],
-          ),
-          const SizedBox(height: 28),
-          _PhaseProgress(phase: phase, isDark: widget.isDark),
-          const SizedBox(height: 24),
-          _OtpCard(
-            icon: Icons.phone_outlined,
-            type: 'Mobile',
-            maskedTarget: _maskMobile(widget.mobile),
-            controller: _mobileOtpCtrl,
-            isVerified: widget.mobileVerified,
-            isActive: phase == 0,
-            isDark: widget.isDark,
-            onVerify: _verifyMobile,
-            accentColor: AppColors.emerald,
-          ),
-          const SizedBox(height: 14),
-          _OtpCard(
-            icon: Icons.email_outlined,
-            type: 'Email',
-            maskedTarget: _maskEmail(widget.email),
-            controller: _emailOtpCtrl,
-            isVerified: widget.emailVerified,
-            isActive: phase == 1,
-            isLocked: phase == 0,
-            isDark: widget.isDark,
-            onVerify: _verifyEmail,
-            accentColor: AppColors.ocean,
-          ),
-          const SizedBox(height: 24),
-          if (phase < 2)
-            _ResendRow(
-              canResend: _canResend,
-              secondsLeft: _secondsLeft,
-              resendCount: _resendCount,
-              isDark: widget.isDark,
-              onResend: _handleResend,
-            ),
-          if (phase < 2) const SizedBox(height: 28),
-          if (phase == 2) ...[
-            _AllVerifiedBanner(isDark: widget.isDark),
-            const SizedBox(height: 24),
-            GradientButton(
-              label: 'Create Account',
-              onPressed: widget.onSubmit,
-              isLoading: widget.isLoading,
-              colors: [const Color(0xFF7C3AED), AppColors.ocean],
-            ),
-            const SizedBox(height: 32),
-          ],
-        ],
-      ),
-    );
-  }
 
   String _maskMobile(String m) {
     if (m.length < 4) return m;
@@ -1119,6 +1133,78 @@ class _Step4State extends State<_Step4> {
         name[name.length - 1] +
         '@' +
         domain;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _StepHeader(
+            icon: Icons.verified_outlined,
+            title: 'Verify Identity',
+            subtitle: otpPhase == 0
+                ? 'Enter the OTP sent to your mobile'
+                : otpPhase == 1
+                ? 'Mobile verified! Now check your email'
+                : 'Both channels verified ✓',
+            gradient: [const Color(0xFF7C3AED), AppColors.ocean],
+          ),
+          const SizedBox(height: 28),
+          _PhaseProgress(phase: otpPhase, isDark: isDark),
+          const SizedBox(height: 24),
+          // Mobile OTP Card
+          _OtpCard(
+            icon: Icons.phone_outlined,
+            type: 'Mobile',
+            identifier: _maskMobile(mobile),
+            controller: mobileOtpCtrl,
+            isVerified: mobileVerified,
+            isActive: otpPhase == 0,
+            isDark: isDark,
+            sendingOtp: sendingMobileOtp,
+            verifyingOtp: verifyingMobileOtp,
+            resendSeconds: mobileResendSeconds,
+            onVerifyOtp: onVerifyMobileOtp,
+            onResendOtp: onResendMobileOtp,
+            accentColor: AppColors.emerald,
+          ),
+          const SizedBox(height: 14),
+          // Email OTP Card
+          _OtpCard(
+            icon: Icons.email_outlined,
+            type: 'Email',
+            identifier: _maskEmail(email),
+            controller: emailOtpCtrl,
+            isVerified: emailVerified,
+            isActive: otpPhase == 1,
+            isLocked: otpPhase == 0,
+            isDark: isDark,
+            sendingOtp: sendingEmailOtp,
+            verifyingOtp: verifyingEmailOtp,
+            resendSeconds: emailResendSeconds,
+            onVerifyOtp: onVerifyEmailOtp,
+            onResendOtp: onResendEmailOtp,
+            accentColor: AppColors.ocean,
+          ),
+          const SizedBox(height: 24),
+          if (otpPhase == 2) ...[
+            _AllVerifiedBanner(isDark: isDark),
+            const SizedBox(height: 24),
+            GradientButton(
+              label: 'Create Account',
+              onPressed: onSubmit,
+              isLoading: isLoading,
+              colors: [const Color(0xFF7C3AED), AppColors.ocean],
+            ),
+          ],
+          const SizedBox(height: 32),
+        ],
+      ),
+    );
   }
 }
 
@@ -1264,22 +1350,28 @@ class _PhaseConnector extends StatelessWidget {
 
 class _OtpCard extends StatelessWidget {
   final IconData icon;
-  final String type, maskedTarget;
+  final String type, identifier;
   final TextEditingController controller;
   final bool isVerified, isActive, isDark;
   final bool isLocked;
-  final VoidCallback onVerify;
+  final bool sendingOtp, verifyingOtp;
+  final int resendSeconds;
+  final VoidCallback onVerifyOtp, onResendOtp;
   final Color accentColor;
 
   const _OtpCard({
     required this.icon,
     required this.type,
-    required this.maskedTarget,
+    required this.identifier,
     required this.controller,
     required this.isVerified,
     required this.isActive,
     required this.isDark,
-    required this.onVerify,
+    required this.sendingOtp,
+    required this.verifyingOtp,
+    required this.resendSeconds,
+    required this.onVerifyOtp,
+    required this.onResendOtp,
     required this.accentColor,
     this.isLocked = false,
   });
@@ -1295,8 +1387,7 @@ class _OtpCard extends StatelessWidget {
     return AnimatedOpacity(
       duration: const Duration(milliseconds: 300),
       opacity: isLocked ? 0.45 : 1.0,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
+      child: Container(
         padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
@@ -1368,8 +1459,8 @@ class _OtpCard extends StatelessWidget {
                         isLocked
                             ? 'Verify mobile first'
                             : isVerified
-                            ? 'Sent to $maskedTarget'
-                            : 'Sent to $maskedTarget',
+                            ? 'Verified ✓'
+                            : 'Sent to $identifier',
                         style: GoogleFonts.inter(
                           fontSize: 11,
                           color: isDark
@@ -1399,7 +1490,7 @@ class _OtpCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 10),
                   GestureDetector(
-                    onTap: onVerify,
+                    onTap: verifyingOtp ? null : onVerifyOtp,
                     child: Container(
                       height: 52,
                       padding: const EdgeInsets.symmetric(horizontal: 18),
@@ -1419,17 +1510,74 @@ class _OtpCard extends StatelessWidget {
                         ],
                       ),
                       child: Center(
-                        child: Text(
-                          'Verify',
-                          style: GoogleFonts.spaceGrotesk(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
-                          ),
-                        ),
+                        child: verifyingOtp
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : Text(
+                                'Verify',
+                                style: GoogleFonts.spaceGrotesk(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.white,
+                                ),
+                              ),
                       ),
                     ),
                   ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (resendSeconds > 0)
+                    Text(
+                      'Resend in ${resendSeconds}s',
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: isDark
+                            ? AppColors.darkTextMuted
+                            : AppColors.lightTextMuted,
+                      ),
+                    )
+                  else
+                    GestureDetector(
+                      onTap: sendingOtp ? null : onResendOtp,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (sendingOtp)
+                            const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 1.5,
+                              ),
+                            )
+                          else
+                            const Icon(
+                              Icons.refresh_rounded,
+                              size: 14,
+                              color: AppColors.ocean,
+                            ),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Resend OTP',
+                            style: GoogleFonts.inter(
+                              fontSize: 12,
+                              color: AppColors.ocean,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                 ],
               ),
             ],
@@ -1559,87 +1707,6 @@ class _OtpInputField extends StatelessWidget {
           borderSide: BorderSide(color: accentColor, width: 2),
         ),
       ),
-    );
-  }
-}
-
-class _ResendRow extends StatelessWidget {
-  final bool canResend, isDark;
-  final int secondsLeft, resendCount;
-  final VoidCallback onResend;
-
-  const _ResendRow({
-    required this.canResend,
-    required this.isDark,
-    required this.secondsLeft,
-    required this.resendCount,
-    required this.onResend,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: canResend
-          ? GestureDetector(
-              onTap: onResend,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 10,
-                ),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(20),
-                  color: AppColors.ocean.withOpacity(isDark ? 0.12 : 0.07),
-                  border: Border.all(color: AppColors.ocean.withOpacity(0.3)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(
-                      Icons.refresh_rounded,
-                      size: 15,
-                      color: AppColors.ocean,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      resendCount == 0 ? 'Resend OTP' : 'Resend again',
-                      style: GoogleFonts.spaceGrotesk(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.ocean,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            )
-          : Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SizedBox(
-                  width: 14,
-                  height: 14,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 1.5,
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      isDark
-                          ? AppColors.darkTextMuted
-                          : AppColors.lightTextMuted,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  'Resend in ${secondsLeft}s',
-                  style: GoogleFonts.inter(
-                    fontSize: 13,
-                    color: isDark
-                        ? AppColors.darkTextMuted
-                        : AppColors.lightTextMuted,
-                  ),
-                ),
-              ],
-            ),
     );
   }
 }
