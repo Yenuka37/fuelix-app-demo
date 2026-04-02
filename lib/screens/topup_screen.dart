@@ -3,7 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import '../models/user_model.dart';
 import '../models/topup_model.dart';
-import '../database/db_helper.dart';
+import '../services/api_service.dart';
 import '../widgets/custom_button.dart';
 
 // ─── Quick-amount presets (LKR) ───────────────────────────────────────────────
@@ -34,7 +34,7 @@ class TopUpScreen extends StatefulWidget {
 
 class _TopUpScreenState extends State<TopUpScreen>
     with SingleTickerProviderStateMixin {
-  final _db = DbHelper();
+  final _apiService = ApiService();
   UserModel? _user;
   WalletModel? _wallet;
   List<TopUpTransactionModel> _history = [];
@@ -84,15 +84,79 @@ class _TopUpScreenState extends State<TopUpScreen>
       setState(() => _loadingWallet = false);
       return;
     }
-    final w = await _db.getWallet(_user!.id!);
-    final h = await _db.getTopUpHistory(_user!.id!);
-    if (mounted) {
+
+    _loadWallet();
+    _loadTransactionHistory();
+  }
+
+  Future<void> _loadWallet() async {
+    final result = await _apiService.getWallet(_user!.id!);
+
+    if (!mounted) return;
+
+    if (result['success']) {
+      final data = result['data'];
+      final wallet = WalletModel(
+        userId: _user!.id!,
+        balance: (data['balance'] as num).toDouble(),
+        updatedAt: data['updatedAt'] != null
+            ? DateTime.tryParse(data['updatedAt'])
+            : null,
+      );
       setState(() {
-        _wallet = w;
-        _history = h;
+        _wallet = wallet;
         _loadingWallet = false;
       });
-      _animCtrl.forward(from: 0);
+    } else {
+      setState(() => _loadingWallet = false);
+      // Show error but don't block UI
+      if (mounted) {
+        showAppSnackbar(
+          context,
+          message: result['error'] ?? 'Failed to load wallet',
+          isError: true,
+        );
+      }
+    }
+  }
+
+  Future<void> _loadTransactionHistory() async {
+    final result = await _apiService.getTopUpTransactions(_user!.id!);
+
+    if (!mounted) return;
+
+    if (result['success']) {
+      List<dynamic> transactionsJson = result['data'];
+      List<TopUpTransactionModel> transactions = transactionsJson
+          .map(
+            (json) => TopUpTransactionModel(
+              id: json['id'],
+              userId: json['userId'],
+              amount: (json['amount'] as num).toDouble(),
+              method: json['method'],
+              status: _parseStatus(json['status']),
+              reference: json['reference'],
+              createdAt: DateTime.parse(json['createdAt']),
+            ),
+          )
+          .toList();
+
+      setState(() => _history = transactions);
+    }
+
+    _animCtrl.forward(from: 0);
+  }
+
+  TopUpStatus _parseStatus(String status) {
+    switch (status.toUpperCase()) {
+      case 'COMPLETED':
+        return TopUpStatus.completed;
+      case 'PENDING':
+        return TopUpStatus.pending;
+      case 'FAILED':
+        return TopUpStatus.failed;
+      default:
+        return TopUpStatus.completed;
     }
   }
 
@@ -118,26 +182,29 @@ class _TopUpScreenState extends State<TopUpScreen>
 
     setState(() => _processing = true);
 
-    final tx = await _db.processTopUp(
-      userId: _user!.id!,
-      amount: amount,
-      method: _kMethods[_selectedMethod].label,
+    final result = await _apiService.topUpWallet(
+      _user!.id!,
+      amount,
+      _kMethods[_selectedMethod].label,
     );
 
     if (!mounted) return;
 
-    if (tx != null) {
-      await _loadData();
+    if (result['success']) {
+      // Reload wallet and history after successful top-up
+      await Future.wait([_loadWallet(), _loadTransactionHistory()]);
+
       setState(() {
         _selectedAmount = null;
         _customCtrl.clear();
-        _tab = 1;
+        _tab = 1; // Switch to history tab after successful top-up
       });
+
       _showSuccessSheet(amount);
     } else {
       showAppSnackbar(
         context,
-        message: 'Top-up failed. Please try again.',
+        message: result['error'] ?? 'Top-up failed. Please try again.',
         isError: true,
       );
     }

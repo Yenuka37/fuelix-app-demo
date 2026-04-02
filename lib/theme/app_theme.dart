@@ -35,6 +35,8 @@ class AppColors {
 
   // Semantic
   static const Color error = Color(0xFFFF453A);
+  static const Color errorDark = Color(0xFFCC2F26); // Added errorDark
+  static const Color errorLight = Color(0xFFFF6B62); // Added errorLight
   static const Color success = Color(0xFF00C896);
   static const Color warning = Color(0xFFFF9F0A);
 }
@@ -303,6 +305,12 @@ class AppTheme {
 
   static LinearGradient get warmGradient => const LinearGradient(
     colors: [AppColors.amber, AppColors.emerald],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
+
+  static LinearGradient get errorGradient => const LinearGradient(
+    colors: [AppColors.error, AppColors.errorDark],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );

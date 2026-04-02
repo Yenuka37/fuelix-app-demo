@@ -5,11 +5,10 @@ import '../theme/app_theme.dart';
 import '../models/user_model.dart';
 import '../models/vehicle_model.dart';
 import '../models/topup_model.dart';
-import '../models/quota_model.dart';
 import '../models/fuel_log_model.dart';
-import '../database/db_helper.dart';
+import '../models/quota_model.dart';
+import '../services/api_service.dart';
 import '../services/tutorial_service.dart';
-import '../services/quota_service.dart';
 import '../widgets/custom_button.dart';
 import '../widgets/tutorial_overlay.dart';
 import 'fuel_stations_screen.dart';
@@ -34,16 +33,12 @@ class FuelCatalogue {
 
   static const List<FuelGrade> keroseneGrades = [FuelGrade('Kerosene', 195)];
 
-  /// Returns applicable grades for a vehicle's fuel type.
   static List<FuelGrade> gradesFor(String fuelType) {
     final f = fuelType.toLowerCase();
     final List<FuelGrade> result = [];
-
     if (f == 'petrol' || f == 'hybrid') result.addAll(petrolGrades);
     if (f == 'diesel' || f == 'hybrid') result.addAll(dieselGrades);
     if (f == 'kerosene') result.addAll(keroseneGrades);
-
-    // Electric / LPG / unknown → return empty so sheet disables logging
     return result;
   }
 }
@@ -73,7 +68,7 @@ class _HomeScreenState extends State<HomeScreen>
     'total_litres': 0,
     'total_spent': 0,
   };
-  final _db = DbHelper();
+  final _apiService = ApiService();
 
   // Tutorial keys
   final _keyWelcome = GlobalKey();
@@ -130,25 +125,95 @@ class _HomeScreenState extends State<HomeScreen>
 
   Future<void> _loadVehicles() async {
     if (_user?.id == null) return;
-    final list = await _db.getVehiclesByUser(_user!.id!);
-    if (mounted) setState(() => _vehicles = list);
+    final result = await _apiService.getVehicles(_user!.id!);
+    if (result['success']) {
+      List<dynamic> jsonList = result['data'];
+      List<VehicleModel> vehicles = jsonList
+          .map(
+            (json) => VehicleModel(
+              id: json['id'],
+              userId: json['userId'],
+              type: json['type'],
+              make: json['make'],
+              model: json['model'],
+              year: json['year'],
+              registrationNo: json['registrationNo'],
+              fuelType: json['fuelType'],
+              engineCC: json['engineCC'] ?? '',
+              color: json['color'] ?? '',
+              fuelPassCode: json['fuelPassCode'],
+              qrGeneratedAt: json['qrGeneratedAt'] != null
+                  ? DateTime.tryParse(json['qrGeneratedAt'])
+                  : null,
+              createdAt: json['createdAt'] != null
+                  ? DateTime.tryParse(json['createdAt'])
+                  : null,
+            ),
+          )
+          .toList();
+      if (mounted) setState(() => _vehicles = vehicles);
+    } else {
+      if (mounted) setState(() => _vehicles = []);
+    }
   }
 
   Future<void> _loadWallet() async {
     if (_user?.id == null) return;
-    final w = await _db.getWallet(_user!.id!);
-    if (mounted) setState(() => _wallet = w);
+    final result = await _apiService.getWallet(_user!.id!);
+    if (result['success']) {
+      final data = result['data'];
+      final wallet = WalletModel(
+        userId: _user!.id!,
+        balance: data['balance'],
+        updatedAt: DateTime.tryParse(data['updatedAt']),
+      );
+      if (mounted) setState(() => _wallet = wallet);
+    } else {
+      if (mounted) setState(() => _wallet = null);
+    }
   }
 
   Future<void> _loadFuelData() async {
     if (_user?.id == null) return;
-    final logs = await _db.getFuelLogsByUser(_user!.id!, limit: 10);
-    final stats = await _db.getFuelLogStats(_user!.id!);
-    if (mounted) {
-      setState(() {
-        _recentLogs = logs;
-        _stats = stats;
-      });
+
+    // Load stats from backend
+    final statsResult = await _apiService.getFuelLogStats(_user!.id!);
+    if (statsResult['success']) {
+      final stats = statsResult['data'];
+      if (mounted) {
+        setState(() {
+          _stats = {
+            'total_logs': stats['totalLogs']?.toDouble() ?? 0,
+            'total_litres': stats['totalLitres'] ?? 0,
+            'total_spent': stats['totalSpent'] ?? 0,
+          };
+        });
+      }
+    }
+
+    // Load recent logs
+    final logsResult = await _apiService.getUserFuelLogs(_user!.id!);
+    if (logsResult['success']) {
+      List<dynamic> logsJson = logsResult['data'];
+      List<FuelLogModel> logs = logsJson
+          .map(
+            (json) => FuelLogModel(
+              id: json['id'],
+              userId: json['userId'],
+              vehicleId: json['vehicleId'],
+              litres: json['litres'],
+              fuelType: json['fuelType'],
+              fuelGrade: json['fuelGrade'],
+              pricePerLitre: json['pricePerLitre'],
+              totalCost: json['totalCost'],
+              stationName: json['stationName'] ?? '',
+              loggedAt: DateTime.parse(json['loggedAt']),
+            ),
+          )
+          .toList();
+      if (mounted) setState(() => _recentLogs = logs);
+    } else {
+      if (mounted) setState(() => _recentLogs = []);
     }
   }
 
@@ -186,6 +251,7 @@ class _HomeScreenState extends State<HomeScreen>
         onSaved: () {
           _loadAll();
         },
+        apiService: _apiService,
       ),
     );
   }
@@ -908,8 +974,13 @@ class _HomeScreenState extends State<HomeScreen>
           isDark: isDark,
           onDelete: () async {
             if (log.id == null) return;
-            await _db.deleteFuelLog(log.id!);
-            _loadFuelData();
+            final result = await _apiService.deleteFuelLog(log.id!);
+            if (result['success']) {
+              _loadFuelData();
+              showAppSnackbar(context, message: 'Log deleted', isSuccess: true);
+            } else {
+              showAppSnackbar(context, message: result['error'], isError: true);
+            }
           },
         );
       }).toList(),
@@ -1205,12 +1276,14 @@ class _FuelLogSheet extends StatefulWidget {
   final List<VehicleModel> vehicles;
   final double walletBalance;
   final VoidCallback onSaved;
+  final ApiService apiService;
 
   const _FuelLogSheet({
     required this.user,
     required this.vehicles,
     required this.walletBalance,
     required this.onSaved,
+    required this.apiService,
   });
 
   @override
@@ -1219,7 +1292,6 @@ class _FuelLogSheet extends StatefulWidget {
 
 class _FuelLogSheetState extends State<_FuelLogSheet> {
   final _formKey = GlobalKey<FormState>();
-  final _db = DbHelper();
 
   late VehicleModel _selectedVehicle;
   FuelGrade? _selectedGrade;
@@ -1229,17 +1301,14 @@ class _FuelLogSheetState extends State<_FuelLogSheet> {
   final _stationCtrl = TextEditingController();
 
   bool _isSaving = false;
-
-  // Limits loaded from DB
   double _quotaRemaining = 0;
   double _walletBalance = 0;
   bool _limitsLoaded = false;
 
-  // Max litres the user can enter (min of quota and wallet-based limit)
   double get _maxLitres {
     if (_selectedGrade == null) return _quotaRemaining;
     final walletLitres = _walletBalance / _selectedGrade!.pricePerLitre;
-    return (_quotaRemaining < walletLitres ? _quotaRemaining : walletLitres);
+    return _quotaRemaining < walletLitres ? _quotaRemaining : walletLitres;
   }
 
   double get _totalCost {
@@ -1267,16 +1336,21 @@ class _FuelLogSheetState extends State<_FuelLogSheet> {
     setState(() => _limitsLoaded = false);
 
     final grades = FuelCatalogue.gradesFor(_selectedVehicle.fuelType);
-    final quota = await _db.getCurrentWeekQuota(
+    final quotaResult = await widget.apiService.getCurrentQuota(
       _selectedVehicle.id!,
       _selectedVehicle.type,
     );
+
+    double remaining = 0;
+    if (quotaResult['success']) {
+      remaining = quotaResult['data']['remainingLitres']?.toDouble() ?? 0;
+    }
 
     if (!mounted) return;
     setState(() {
       _availableGrades = grades;
       _selectedGrade = grades.isNotEmpty ? grades.first : null;
-      _quotaRemaining = quota?.remainingLitres ?? 0.0;
+      _quotaRemaining = remaining;
       _limitsLoaded = true;
       _litresCtrl.clear();
     });
@@ -1291,24 +1365,24 @@ class _FuelLogSheetState extends State<_FuelLogSheet> {
     final litres = double.parse(_litresCtrl.text.trim());
     final cost = litres * _selectedGrade!.pricePerLitre;
 
-    final log = FuelLogModel(
-      userId: widget.user.id!,
-      vehicleId: _selectedVehicle.id!,
-      litres: litres,
-      fuelType: _selectedVehicle.fuelType,
-      fuelGrade: _selectedGrade!.name,
-      pricePerLitre: _selectedGrade!.pricePerLitre,
-      totalCost: cost,
-      stationName: _stationCtrl.text.trim(),
-      loggedAt: DateTime.now(),
-    );
+    final logData = {
+      'userId': widget.user.id!,
+      'vehicleId': _selectedVehicle.id!,
+      'litres': litres,
+      'fuelType': _selectedVehicle.fuelType,
+      'fuelGrade': _selectedGrade!.name,
+      'pricePerLitre': _selectedGrade!.pricePerLitre,
+      'totalCost': cost,
+      'stationName': _stationCtrl.text.trim(),
+      'vehicleType': _selectedVehicle.type,
+    };
 
-    final result = await _db.saveFuelLog(log, _selectedVehicle.type);
+    final result = await widget.apiService.addFuelLog(logData);
 
     if (!mounted) return;
     setState(() => _isSaving = false);
 
-    if (result > 0) {
+    if (result['success']) {
       widget.onSaved();
       Navigator.pop(context);
       showAppSnackbar(
@@ -1316,14 +1390,14 @@ class _FuelLogSheetState extends State<_FuelLogSheet> {
         message: 'Fuel log saved successfully!',
         isSuccess: true,
       );
-    } else if (result == -1) {
+    } else if (result['error'].contains('quota')) {
       showAppSnackbar(
         context,
         message:
             'Exceeds your weekly fuel quota. Max: ${_quotaRemaining.toStringAsFixed(1)} L',
         isError: true,
       );
-    } else if (result == -2) {
+    } else if (result['error'].contains('balance')) {
       showAppSnackbar(
         context,
         message: 'Insufficient wallet balance. Top up to continue.',
@@ -1523,9 +1597,6 @@ class _FuelLogSheetState extends State<_FuelLogSheet> {
 
   // ── Quota + wallet limits bar ─────────────────────────────────────────────
   Widget _buildLimitsBar(bool isDark) {
-    final walletLitres = _selectedGrade != null
-        ? _walletBalance / _selectedGrade!.pricePerLitre
-        : double.infinity;
     final effectiveMax = _maxLitres;
 
     return Container(
@@ -1554,7 +1625,7 @@ class _FuelLogSheetState extends State<_FuelLogSheet> {
             color: _walletBalance > 0 ? AppColors.ocean : AppColors.error,
             isDark: isDark,
           ),
-          if (_selectedGrade != null && walletLitres.isFinite) ...[
+          if (_selectedGrade != null) ...[
             const SizedBox(height: 10),
             _limitRow(
               icon: Icons.straighten_rounded,
@@ -1718,7 +1789,6 @@ class _FuelLogSheetState extends State<_FuelLogSheet> {
             return null;
           },
         ),
-        // Live progress bar
         if (_litresCtrl.text.isNotEmpty && max > 0) ...[
           const SizedBox(height: 8),
           _buildLitresProgressBar(isDark, max),

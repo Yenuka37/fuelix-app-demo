@@ -359,6 +359,524 @@ class ApiService {
     }
   }
 
+  // ==================== FUEL LOG APIs ====================
+
+  Future<Map<String, dynamic>> addFuelLog(Map<String, dynamic> logData) async {
+    try {
+      final token = await getToken();
+      if (token == null) {
+        return {'success': false, 'error': 'Not authenticated'};
+      }
+
+      // Ensure all required fields are present and not null
+      final Map<String, dynamic> cleanData = {};
+
+      if (logData.containsKey('userId') && logData['userId'] != null) {
+        cleanData['userId'] = logData['userId'];
+      } else {
+        return {'success': false, 'error': 'userId is required'};
+      }
+
+      if (logData.containsKey('vehicleId') && logData['vehicleId'] != null) {
+        cleanData['vehicleId'] = logData['vehicleId'];
+      } else {
+        return {'success': false, 'error': 'vehicleId is required'};
+      }
+
+      if (logData.containsKey('litres') && logData['litres'] != null) {
+        cleanData['litres'] = logData['litres'];
+      } else {
+        return {'success': false, 'error': 'litres is required'};
+      }
+
+      if (logData.containsKey('fuelType') && logData['fuelType'] != null) {
+        cleanData['fuelType'] = logData['fuelType'];
+      } else {
+        return {'success': false, 'error': 'fuelType is required'};
+      }
+
+      if (logData.containsKey('fuelGrade') && logData['fuelGrade'] != null) {
+        cleanData['fuelGrade'] = logData['fuelGrade'];
+      } else {
+        return {'success': false, 'error': 'fuelGrade is required'};
+      }
+
+      if (logData.containsKey('pricePerLitre') &&
+          logData['pricePerLitre'] != null) {
+        cleanData['pricePerLitre'] = logData['pricePerLitre'];
+      } else {
+        return {'success': false, 'error': 'pricePerLitre is required'};
+      }
+
+      if (logData.containsKey('totalCost') && logData['totalCost'] != null) {
+        cleanData['totalCost'] = logData['totalCost'];
+      } else {
+        return {'success': false, 'error': 'totalCost is required'};
+      }
+
+      if (logData.containsKey('vehicleType') &&
+          logData['vehicleType'] != null) {
+        cleanData['vehicleType'] = logData['vehicleType'];
+      } else {
+        return {'success': false, 'error': 'vehicleType is required'};
+      }
+
+      // Optional fields
+      if (logData.containsKey('stationName') &&
+          logData['stationName'] != null) {
+        cleanData['stationName'] = logData['stationName'];
+      } else {
+        cleanData['stationName'] = '';
+      }
+
+      print('Sending fuel log data: $cleanData');
+
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/fuel-logs'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: json.encode(cleanData),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+      print('Response status: ${response.statusCode}');
+      print('Response body: $data');
+
+      if (response.statusCode == 200) {
+        return {'success': true, 'data': data};
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to add fuel log',
+        };
+      }
+    } catch (e) {
+      print('Error adding fuel log: $e');
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
+  Future<Map<String, dynamic>> getUserFuelLogs(int userId) async {
+    try {
+      final token = await getToken();
+      if (token == null) {
+        return {'success': false, 'error': 'Not authenticated'};
+      }
+
+      final response = await http
+          .get(
+            Uri.parse('$baseUrl/fuel-logs/user/$userId'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 200) {
+        return {'success': true, 'data': data};
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to fetch fuel logs',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
+  Future<Map<String, dynamic>> getFuelLogStats(int userId) async {
+    try {
+      final token = await getToken();
+      if (token == null) {
+        return {'success': false, 'error': 'Not authenticated'};
+      }
+
+      final response = await http
+          .get(
+            Uri.parse('$baseUrl/fuel-logs/stats/$userId'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 200) {
+        return {'success': true, 'data': data};
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to fetch stats',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
+  Future<Map<String, dynamic>> deleteFuelLog(int logId) async {
+    try {
+      final token = await getToken();
+      if (token == null) {
+        return {'success': false, 'error': 'Not authenticated'};
+      }
+
+      final response = await http
+          .delete(
+            Uri.parse('$baseUrl/fuel-logs/$logId'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 200) {
+        return {'success': true, 'data': data};
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to delete fuel log',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
+  // ==================== WALLET APIs ====================
+
+  Future<Map<String, dynamic>> getWallet(int userId) async {
+    try {
+      final token = await getToken();
+      if (token == null) {
+        return {'success': false, 'error': 'Not authenticated'};
+      }
+
+      final response = await http
+          .get(
+            Uri.parse('$baseUrl/wallet/$userId'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 200) {
+        return {'success': true, 'data': data};
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to fetch wallet',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
+  Future<Map<String, dynamic>> topUpWallet(
+    int userId,
+    double amount,
+    String method, {
+    String? reference,
+  }) async {
+    try {
+      final token = await getToken();
+      if (token == null) {
+        return {'success': false, 'error': 'Not authenticated'};
+      }
+
+      final Map<String, dynamic> requestData = {
+        'userId': userId,
+        'amount': amount,
+        'method': method,
+      };
+
+      if (reference != null) {
+        requestData['reference'] = reference;
+      }
+
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/wallet/topup'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: json.encode(requestData),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 200) {
+        return {'success': true, 'data': data};
+      } else {
+        return {'success': false, 'error': data['error'] ?? 'Top up failed'};
+      }
+    } catch (e) {
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
+  Future<Map<String, dynamic>> getTopUpTransactions(int userId) async {
+    try {
+      final token = await getToken();
+      if (token == null) {
+        return {'success': false, 'error': 'Not authenticated'};
+      }
+
+      final response = await http
+          .get(
+            Uri.parse('$baseUrl/wallet/transactions/$userId'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 200) {
+        return {'success': true, 'data': data};
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to fetch transactions',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
+  // ==================== QUOTA APIs ====================
+
+  Future<Map<String, dynamic>> getCurrentQuota(
+    int vehicleId,
+    String vehicleType,
+  ) async {
+    try {
+      final token = await getToken();
+      if (token == null) {
+        return {'success': false, 'error': 'Not authenticated'};
+      }
+
+      final response = await http
+          .get(
+            Uri.parse(
+              '$baseUrl/quotas/current/$vehicleId?vehicleType=$vehicleType',
+            ),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 200) {
+        return {'success': true, 'data': data};
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to fetch quota',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
+  Future<Map<String, dynamic>> getQuotaHistory(int vehicleId) async {
+    try {
+      final token = await getToken();
+      if (token == null) {
+        return {'success': false, 'error': 'Not authenticated'};
+      }
+
+      final response = await http
+          .get(
+            Uri.parse('$baseUrl/quotas/history/$vehicleId'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 200) {
+        return {'success': true, 'data': data};
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to fetch quota history',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
+  // ==================== FORGOT PASSWORD APIs ====================
+
+  Future<Map<String, dynamic>> sendPasswordResetOTP(String email) async {
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/auth/forgot-password/send-otp'),
+            headers: {'Content-Type': 'application/json'},
+            body: json.encode({'email': email}),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 200) {
+        return {'success': true, 'data': data};
+      } else if (response.statusCode == 404) {
+        return {
+          'success': false,
+          'error': 'No account found with this email address',
+        };
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to send reset code',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
+  Future<Map<String, dynamic>> verifyPasswordResetOTP(
+    String email,
+    String otp,
+  ) async {
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/auth/forgot-password/verify-otp'),
+            headers: {'Content-Type': 'application/json'},
+            body: json.encode({
+              'identifier': email,
+              'otp': otp,
+              'type': 'EMAIL',
+            }),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 200 && data['valid'] == true) {
+        return {
+          'success': true,
+          'data': data,
+          'resetToken': data['resetToken'],
+        };
+      } else {
+        return {
+          'success': false,
+          'error': data['message'] ?? 'Invalid or expired OTP',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
+  Future<Map<String, dynamic>> resetPassword(
+    String email,
+    String otp,
+    String newPassword,
+  ) async {
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/auth/forgot-password/reset'),
+            headers: {'Content-Type': 'application/json'},
+            body: json.encode({
+              'email': email,
+              'otp': otp,
+              'newPassword': newPassword,
+            }),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 200) {
+        return {'success': true, 'data': data};
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to reset password',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
+  // ==================== DELETE ACCOUNT API ====================
+
+  Future<Map<String, dynamic>> deleteAccount(String nic, String reason) async {
+    try {
+      final token = await getToken();
+      // For delete account, we don't need token since user can't login
+      // But we still need to make the request
+
+      final response = await http
+          .delete(
+            Uri.parse('$baseUrl/auth/delete-account'),
+            headers: {'Content-Type': 'application/json'},
+            body: json.encode({'nic': nic, 'reason': reason}),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 200) {
+        // Clear any stored tokens
+        await clearToken();
+        return {'success': true, 'data': data};
+      } else if (response.statusCode == 404) {
+        return {
+          'success': false,
+          'error': 'No account found with this NIC number',
+        };
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to delete account',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
   // Test connection to server
   static Future<bool> testConnection() async {
     try {
