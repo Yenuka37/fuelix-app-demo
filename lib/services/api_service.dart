@@ -157,6 +157,208 @@ class ApiService {
     }
   }
 
+  // Get user profile
+  Future<Map<String, dynamic>> getUserProfile() async {
+    try {
+      final token = await getToken();
+      if (token == null) {
+        return {'success': false, 'error': 'Not authenticated'};
+      }
+
+      final response = await http
+          .get(
+            Uri.parse('$baseUrl/auth/profile'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 200) {
+        return {'success': true, 'data': data};
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to get profile',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
+  // ==================== VEHICLE APIs ====================
+
+  Future<Map<String, dynamic>> getVehicles(int userId) async {
+    try {
+      final token = await getToken();
+      if (token == null) {
+        return {'success': false, 'error': 'Not authenticated'};
+      }
+
+      final response = await http
+          .get(
+            Uri.parse('$baseUrl/vehicles/user/$userId'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 200) {
+        return {'success': true, 'data': data};
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to fetch vehicles',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
+  Future<Map<String, dynamic>> addVehicle(
+    Map<String, dynamic> vehicleData,
+  ) async {
+    try {
+      final token = await getToken();
+      if (token == null) {
+        return {'success': false, 'error': 'Not authenticated'};
+      }
+
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/vehicles'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: json.encode(vehicleData),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 200) {
+        return {'success': true, 'data': data};
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to add vehicle',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
+  Future<Map<String, dynamic>> updateVehicle(
+    int id,
+    Map<String, dynamic> vehicleData,
+  ) async {
+    try {
+      final token = await getToken();
+      if (token == null) {
+        return {'success': false, 'error': 'Not authenticated'};
+      }
+
+      final response = await http
+          .put(
+            Uri.parse('$baseUrl/vehicles/$id'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: json.encode(vehicleData),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 200) {
+        return {'success': true, 'data': data};
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to update vehicle',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
+  Future<Map<String, dynamic>> deleteVehicle(int id) async {
+    try {
+      final token = await getToken();
+      if (token == null) {
+        return {'success': false, 'error': 'Not authenticated'};
+      }
+
+      final response = await http
+          .delete(
+            Uri.parse('$baseUrl/vehicles/$id'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 200) {
+        return {'success': true, 'data': data};
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to delete vehicle',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
+  Future<Map<String, dynamic>> generateFuelPass(int vehicleId) async {
+    try {
+      final token = await getToken();
+      if (token == null) {
+        return {'success': false, 'error': 'Not authenticated'};
+      }
+
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/vehicles/$vehicleId/generate-pass'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 200) {
+        return {'success': true, 'data': data};
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to generate Fuel Pass',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
   // Test connection to server
   static Future<bool> testConnection() async {
     try {

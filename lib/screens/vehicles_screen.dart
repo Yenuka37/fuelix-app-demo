@@ -9,6 +9,7 @@ import '../models/vehicle_model.dart';
 import '../models/quota_model.dart';
 import '../services/quota_service.dart';
 import '../services/tutorial_service.dart';
+import '../services/api_service.dart';
 import '../database/db_helper.dart';
 import '../widgets/custom_button.dart';
 import '../widgets/tutorial_overlay.dart';
@@ -45,18 +46,7 @@ const _kMakes = [
   'Other',
 ];
 
-// ── Fuel pass code generator (8 chars, 0-9 A-Z, globally unique) ──────────────
-const _kCodeChars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-
-String _generatePassCode() {
-  final rng = Random.secure();
-  return List.generate(
-    8,
-    (_) => _kCodeChars[rng.nextInt(_kCodeChars.length)],
-  ).join();
-}
-
-// ── Colour / icon helpers (shared across widgets) ─────────────────────────────
+// ── Colour / icon helpers ─────────────────────────────────────────────
 Color vehicleTypeColor(String type) {
   switch (type) {
     case 'Car':
@@ -107,6 +97,7 @@ class VehiclesScreen extends StatefulWidget {
 class _VehiclesScreenState extends State<VehiclesScreen>
     with SingleTickerProviderStateMixin {
   final _db = DbHelper();
+  final _apiService = ApiService();
   UserModel? _user;
   List<VehicleModel> _vehicles = [];
   bool _loading = true;
@@ -115,7 +106,6 @@ class _VehiclesScreenState extends State<VehiclesScreen>
   final _keyAddBtn = GlobalKey();
   final _keyVehicleCard = GlobalKey();
   final _keyFuelPass = GlobalKey();
-  final _keyManage = GlobalKey();
   bool _showTour = false;
 
   late AnimationController _animCtrl;
@@ -161,14 +151,61 @@ class _VehiclesScreenState extends State<VehiclesScreen>
       setState(() => _loading = false);
       return;
     }
-    final list = await _db.getVehiclesByUser(_user!.id!);
-    if (mounted) {
-      setState(() {
-        _vehicles = list;
-        _loading = false;
-      });
-      _animCtrl.forward(from: 0);
+
+    setState(() => _loading = true);
+
+    // Fetch from backend
+    final result = await _apiService.getVehicles(_user!.id!);
+
+    if (result['success']) {
+      List<dynamic> vehiclesJson = result['data'];
+      List<VehicleModel> vehicles = vehiclesJson
+          .map(
+            (json) => VehicleModel(
+              id: json['id'],
+              userId: json['userId'],
+              type: json['type'],
+              make: json['make'],
+              model: json['model'],
+              year: json['year'],
+              registrationNo: json['registrationNo'],
+              fuelType: json['fuelType'],
+              engineCC: json['engineCC'] ?? '',
+              color: json['color'] ?? '',
+              fuelPassCode: json['fuelPassCode'],
+              qrGeneratedAt: json['qrGeneratedAt'] != null
+                  ? DateTime.tryParse(json['qrGeneratedAt'])
+                  : null,
+              createdAt: json['createdAt'] != null
+                  ? DateTime.tryParse(json['createdAt'])
+                  : null,
+            ),
+          )
+          .toList();
+
+      // Sync to local DB (optional - for offline fallback)
+      for (var v in vehicles) {
+        await _db.insertVehicle(v);
+      }
+
+      if (mounted) {
+        setState(() {
+          _vehicles = vehicles;
+          _loading = false;
+        });
+      }
+    } else {
+      // Fallback to local DB
+      final list = await _db.getVehiclesByUser(_user!.id!);
+      if (mounted) {
+        setState(() {
+          _vehicles = list;
+          _loading = false;
+        });
+      }
     }
+
+    _animCtrl.forward(from: 0);
   }
 
   // ── Add / Edit form ───────────────────────────────────────────────────────
@@ -182,8 +219,12 @@ class _VehiclesScreenState extends State<VehiclesScreen>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) =>
-          _VehicleFormSheet(user: _user!, vehicle: vehicle, db: _db),
+      builder: (_) => _VehicleFormSheet(
+        user: _user!,
+        vehicle: vehicle,
+        db: _db,
+        apiService: _apiService,
+      ),
     );
     if (result == true) _loadVehicles();
   }
@@ -194,7 +235,7 @@ class _VehiclesScreenState extends State<VehiclesScreen>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _FuelPassSheet(vehicle: v),
+      builder: (_) => _FuelPassSheet(vehicle: v, db: _db),
     );
   }
 
@@ -274,23 +315,11 @@ class _VehiclesScreenState extends State<VehiclesScreen>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text(
-              'Cancel',
-              style: GoogleFonts.spaceGrotesk(
-                color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+            child: Text('Cancel'),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text(
-              'Generate',
-              style: GoogleFonts.spaceGrotesk(
-                color: AppColors.emerald,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
+            child: Text('Generate', style: TextStyle(color: AppColors.emerald)),
           ),
         ],
       ),
@@ -298,26 +327,20 @@ class _VehiclesScreenState extends State<VehiclesScreen>
 
     if (ok != true || !mounted) return;
 
-    // Generate a globally unique code
-    String code;
-    do {
-      code = _generatePassCode();
-    } while (await _db.fuelPassCodeExists(code));
+    setState(() => _loading = true);
 
-    final success = await _db.setFuelPassCode(v.id!, code, v.type);
+    final result = await _apiService.generateFuelPass(v.id!);
+
+    setState(() => _loading = false);
+
     if (!mounted) return;
 
-    if (success) {
+    if (result['success']) {
       await _loadVehicles();
-      // Show the fuel pass immediately
       final updated = _vehicles.firstWhere((x) => x.id == v.id);
       _showFuelPass(updated);
     } else {
-      showAppSnackbar(
-        context,
-        message: 'Failed to generate. Try again.',
-        isError: true,
-      );
+      showAppSnackbar(context, message: result['error'], isError: true);
     }
   }
 
@@ -337,35 +360,29 @@ class _VehiclesScreenState extends State<VehiclesScreen>
         ),
         content: Text(
           'Remove ${v.displayName} (${v.registrationNo}) from your garage?',
-          style: Theme.of(context).textTheme.bodyMedium,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text(
-              'Cancel',
-              style: GoogleFonts.spaceGrotesk(
-                color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+            child: Text('Cancel'),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text(
-              'Remove',
-              style: GoogleFonts.spaceGrotesk(
-                color: AppColors.error,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+            child: Text('Remove', style: TextStyle(color: AppColors.error)),
           ),
         ],
       ),
     );
     if (ok == true) {
-      await _db.deleteVehicle(v.id!);
-      _loadVehicles();
+      setState(() => _loading = true);
+      final result = await _apiService.deleteVehicle(v.id!);
+      if (result['success']) {
+        await _db.deleteVehicle(v.id!);
+        await _loadVehicles();
+      } else {
+        showAppSnackbar(context, message: result['error'], isError: true);
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -404,7 +421,6 @@ class _VehiclesScreenState extends State<VehiclesScreen>
                         style: Theme.of(context).textTheme.headlineMedium,
                       ),
                     ),
-                    // Add button — tutorial key attached
                     KeyedSubtree(
                       key: _keyAddBtn,
                       child: GestureDetector(
@@ -483,7 +499,6 @@ class _VehiclesScreenState extends State<VehiclesScreen>
                                 _confirmGenerateQr(_vehicles[i]),
                             onViewFuelPass: () async =>
                                 _showFuelPass(_vehicles[i]),
-                            // attach key only to first card
                             cardKey: i == 0 ? _keyVehicleCard : null,
                             fuelPassKey: i == 0 ? _keyFuelPass : null,
                           ),
@@ -498,7 +513,6 @@ class _VehiclesScreenState extends State<VehiclesScreen>
 
     if (!_showTour) return screen;
 
-    // Build steps — swap card step based on whether vehicles exist
     final List<TourStep> steps = [
       TourStep(
         targetKey: _keyAddBtn,
@@ -524,8 +538,7 @@ class _VehiclesScreenState extends State<VehiclesScreen>
           targetKey: _keyFuelPass,
           title: 'Get Fuel Pass',
           body:
-              'Generate a unique QR Fuel Pass for this vehicle. '
-              'Once generated, vehicle details are locked permanently.',
+              'Generate a unique QR Fuel Pass for this vehicle. Once generated, vehicle details are locked permanently.',
           icon: Icons.qr_code_rounded,
           gradient: [AppColors.emerald, AppColors.ocean],
           position: TooltipPosition.above,
@@ -608,12 +621,10 @@ class _VehicleCard extends StatelessWidget {
         ),
         child: Column(
           children: [
-            // ── Header ─────────────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 12, 12),
               child: Row(
                 children: [
-                  // Type icon
                   Stack(
                     children: [
                       Container(
@@ -640,7 +651,6 @@ class _VehicleCard extends StatelessWidget {
                           color: Colors.white,
                         ),
                       ),
-                      // Lock badge if QR generated
                       if (locked)
                         Positioned(
                           right: -2,
@@ -710,7 +720,6 @@ class _VehicleCard extends StatelessWidget {
                       ],
                     ),
                   ),
-                  // Menu
                   PopupMenuButton<String>(
                     onSelected: (val) {
                       switch (val) {
@@ -742,20 +751,20 @@ class _VehicleCard extends StatelessWidget {
                           : AppColors.lightTextSub,
                     ),
                     itemBuilder: (_) => [
-                      if (!locked) ...[
+                      if (!locked)
                         _menuItem(
                           'qr',
                           Icons.qr_code_rounded,
                           'Generate Fuel Pass',
                           AppColors.emerald,
                         ),
+                      if (!locked)
                         _menuItem(
                           'edit',
                           Icons.edit_outlined,
                           'Edit',
                           AppColors.ocean,
                         ),
-                      ],
                       if (locked)
                         _menuItem(
                           'pass',
@@ -774,7 +783,6 @@ class _VehicleCard extends StatelessWidget {
                 ],
               ),
             ),
-            // ── Details row ────────────────────────────────────────────────
             Divider(
               height: 1,
               color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
@@ -805,7 +813,6 @@ class _VehicleCard extends StatelessWidget {
                     ),
                   ],
                   const Spacer(),
-                  // Quick action button
                   if (!locked)
                     KeyedSubtree(
                       key: fuelPassKey,
@@ -887,9 +894,9 @@ class _VehicleCard extends StatelessWidget {
             ),
           ],
         ),
-      ), // Container
-    ); // KeyedSubtree
-  } // build
+      ),
+    );
+  }
 
   PopupMenuItem<String> _menuItem(
     String val,
@@ -917,17 +924,17 @@ class _VehicleCard extends StatelessWidget {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// Fuel Pass Bottom-Sheet  (StatefulWidget — loads live quota)
+// Fuel Pass Bottom-Sheet
 // ═════════════════════════════════════════════════════════════════════════════
 class _FuelPassSheet extends StatefulWidget {
   final VehicleModel vehicle;
-  const _FuelPassSheet({required this.vehicle});
+  final DbHelper db;
+  const _FuelPassSheet({required this.vehicle, required this.db});
   @override
   State<_FuelPassSheet> createState() => _FuelPassSheetState();
 }
 
 class _FuelPassSheetState extends State<_FuelPassSheet> {
-  final _db = DbHelper();
   FuelQuotaModel? _quota;
   bool _loading = true;
 
@@ -942,7 +949,7 @@ class _FuelPassSheetState extends State<_FuelPassSheet> {
       setState(() => _loading = false);
       return;
     }
-    final q = await _db.getCurrentWeekQuota(
+    final q = await widget.db.getCurrentWeekQuota(
       widget.vehicle.id!,
       widget.vehicle.type,
     );
@@ -978,8 +985,7 @@ class _FuelPassSheetState extends State<_FuelPassSheet> {
     final code = widget.vehicle.fuelPassCode ?? '';
     final qrData =
         'FUELIX|${widget.vehicle.fuelPassCode}|${widget.vehicle.registrationNo}|'
-        '${widget.vehicle.make} ${widget.vehicle.model}'
-        '|${widget.vehicle.year}|${widget.vehicle.fuelType}';
+        '${widget.vehicle.make} ${widget.vehicle.model}|${widget.vehicle.year}|${widget.vehicle.fuelType}';
 
     return Container(
       decoration: BoxDecoration(
@@ -990,7 +996,6 @@ class _FuelPassSheetState extends State<_FuelPassSheet> {
         physics: const BouncingScrollPhysics(),
         child: Column(
           children: [
-            // Handle
             const SizedBox(height: 12),
             Container(
               width: 40,
@@ -1001,8 +1006,6 @@ class _FuelPassSheetState extends State<_FuelPassSheet> {
               ),
             ),
             const SizedBox(height: 20),
-
-            // ── Pass card ─────────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: Container(
@@ -1028,7 +1031,6 @@ class _FuelPassSheetState extends State<_FuelPassSheet> {
                 ),
                 child: Column(
                   children: [
-                    // Header
                     Padding(
                       padding: const EdgeInsets.fromLTRB(22, 22, 22, 16),
                       child: Row(
@@ -1093,8 +1095,6 @@ class _FuelPassSheetState extends State<_FuelPassSheet> {
                         ],
                       ),
                     ),
-
-                    // White QR area
                     Container(
                       margin: const EdgeInsets.symmetric(horizontal: 22),
                       padding: const EdgeInsets.all(20),
@@ -1163,8 +1163,6 @@ class _FuelPassSheetState extends State<_FuelPassSheet> {
                         ],
                       ),
                     ),
-
-                    // Vehicle details strip
                     Padding(
                       padding: const EdgeInsets.fromLTRB(22, 16, 22, 22),
                       child: Row(
@@ -1197,8 +1195,6 @@ class _FuelPassSheetState extends State<_FuelPassSheet> {
               ),
             ),
             const SizedBox(height: 20),
-
-            // ── Weekly Quota Card ─────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: _loading
@@ -1220,8 +1216,6 @@ class _FuelPassSheetState extends State<_FuelPassSheet> {
                   : const SizedBox.shrink(),
             ),
             const SizedBox(height: 16),
-
-            // ── Info notice ───────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: _Notice(
@@ -1229,13 +1223,10 @@ class _FuelPassSheetState extends State<_FuelPassSheet> {
                 color: AppColors.ocean,
                 isDark: isDark,
                 text:
-                    'Show this QR code at fuel stations to authorise refuelling. '
-                    'This pass is unique to this vehicle and cannot be transferred.',
+                    'Show this QR code at fuel stations to authorise refuelling. This pass is unique to this vehicle and cannot be transferred.',
               ),
             ),
             const SizedBox(height: 12),
-
-            // ── Lock notice ───────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 0, 24, 36),
               child: _Notice(
@@ -1243,8 +1234,7 @@ class _FuelPassSheetState extends State<_FuelPassSheet> {
                 color: AppColors.amber,
                 isDark: isDark,
                 text:
-                    'Vehicle details are locked. '
-                    'The Fuel Pass code cannot be regenerated.',
+                    'Vehicle details are locked. The Fuel Pass code cannot be regenerated.',
               ),
             ),
           ],
@@ -1254,7 +1244,6 @@ class _FuelPassSheetState extends State<_FuelPassSheet> {
   }
 }
 
-// ─── Weekly Quota Card ────────────────────────────────────────────────────────
 class _QuotaCard extends StatelessWidget {
   final FuelQuotaModel quota;
   final String vehicleType;
@@ -1275,7 +1264,6 @@ class _QuotaCard extends StatelessWidget {
     final pct = quota.usedPercent;
     final exhausted = quota.isExhausted;
 
-    // Gauge colour: green → amber → red as usage grows
     Color gaugeColor;
     if (pct < 0.5)
       gaugeColor = AppColors.emerald;
@@ -1299,7 +1287,6 @@ class _QuotaCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Header ───────────────────────────────────────────────────
           Row(
             children: [
               Container(
@@ -1348,7 +1335,6 @@ class _QuotaCard extends StatelessWidget {
                   ],
                 ),
               ),
-              // Days remaining badge
               Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 10,
@@ -1377,8 +1363,6 @@ class _QuotaCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 18),
-
-          // ── Big numbers row ───────────────────────────────────────────
           Row(
             children: [
               _QuotaStat(
@@ -1405,8 +1389,6 @@ class _QuotaCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 16),
-
-          // ── Progress bar ──────────────────────────────────────────────
           Row(
             children: [
               Expanded(
@@ -1453,8 +1435,6 @@ class _QuotaCard extends StatelessWidget {
               ),
             ],
           ),
-
-          // ── Exhausted notice ──────────────────────────────────────────
           if (exhausted) ...[
             const SizedBox(height: 14),
             Container(
@@ -1474,8 +1454,7 @@ class _QuotaCard extends StatelessWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Your weekly quota is exhausted. '
-                      'Balance resets every Monday.',
+                      'Your weekly quota is exhausted. Balance resets every Monday.',
                       style: GoogleFonts.inter(
                         fontSize: 12,
                         color: AppColors.error,
@@ -1538,7 +1517,6 @@ class _QuotaStat extends StatelessWidget {
   );
 }
 
-// ─── Notice ───────────────────────────────────────────────────────────────────
 class _Notice extends StatelessWidget {
   final IconData icon;
   final Color color;
@@ -1612,7 +1590,13 @@ class _VehicleFormSheet extends StatefulWidget {
   final UserModel user;
   final VehicleModel? vehicle;
   final DbHelper db;
-  const _VehicleFormSheet({required this.user, required this.db, this.vehicle});
+  final ApiService apiService;
+  const _VehicleFormSheet({
+    required this.user,
+    required this.db,
+    required this.apiService,
+    this.vehicle,
+  });
 
   @override
   State<_VehicleFormSheet> createState() => _VehicleFormSheetState();
@@ -1670,61 +1654,43 @@ class _VehicleFormSheetState extends State<_VehicleFormSheet> {
       );
       return;
     }
+
     setState(() => _isLoading = true);
 
-    final userId = widget.user.id ?? 0;
-    final regNo = _regCtrl.text.trim().toUpperCase();
+    final vehicleData = {
+      'userId': widget.user.id,
+      'type': _type!,
+      'make': _makeCtrl.text.trim(),
+      'model': _modelCtrl.text.trim(),
+      'year': _yearCtrl.text.trim(),
+      'registrationNo': _regCtrl.text.trim().toUpperCase(),
+      'fuelType': _fuelType!,
+      'engineCC': _engCtrl.text.trim(),
+      'color': _colorCtrl.text.trim(),
+    };
 
-    final exists = await widget.db.regNoExists(
-      regNo,
-      userId,
-      excludeId: widget.vehicle?.id,
-    );
-    if (!mounted) return;
-    if (exists) {
-      setState(() => _isLoading = false);
-      showAppSnackbar(
-        context,
-        message: 'Registration number already added.',
-        isError: true,
+    Map<String, dynamic> result;
+    if (_isEdit) {
+      result = await widget.apiService.updateVehicle(
+        widget.vehicle!.id!,
+        vehicleData,
       );
-      return;
+    } else {
+      result = await widget.apiService.addVehicle(vehicleData);
     }
-
-    final vehicle = VehicleModel(
-      id: widget.vehicle?.id,
-      userId: userId,
-      type: _type!,
-      make: _makeCtrl.text.trim(),
-      model: _modelCtrl.text.trim(),
-      year: _yearCtrl.text.trim(),
-      registrationNo: regNo,
-      fuelType: _fuelType!,
-      engineCC: _engCtrl.text.trim(),
-      color: _colorCtrl.text.trim(),
-      createdAt: widget.vehicle?.createdAt ?? DateTime.now(),
-    );
-
-    final result = _isEdit
-        ? await widget.db.updateVehicle(vehicle)
-        : await widget.db.insertVehicle(vehicle);
 
     if (!mounted) return;
     setState(() => _isLoading = false);
 
-    if (result > 0 || (result >= 0 && _isEdit)) {
+    if (result['success']) {
       showAppSnackbar(
         context,
-        message: _isEdit ? 'Vehicle updated!' : 'Vehicle added to your garage!',
+        message: _isEdit ? 'Vehicle updated!' : 'Vehicle added!',
         isSuccess: true,
       );
       Navigator.pop(context, true);
     } else {
-      showAppSnackbar(
-        context,
-        message: 'Failed to save. Try again.',
-        isError: true,
-      );
+      showAppSnackbar(context, message: result['error'], isError: true);
     }
   }
 
@@ -1751,7 +1717,6 @@ class _VehicleFormSheetState extends State<_VehicleFormSheet> {
             ),
           ),
           const SizedBox(height: 16),
-          // Title
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
             child: Row(
@@ -1801,7 +1766,6 @@ class _VehicleFormSheetState extends State<_VehicleFormSheet> {
             ),
           ),
           const SizedBox(height: 20),
-          // Form
           Expanded(
             child: SingleChildScrollView(
               physics: const BouncingScrollPhysics(),
@@ -1950,6 +1914,7 @@ class _VehicleFormSheetState extends State<_VehicleFormSheet> {
                       isLoading: _isLoading,
                       colors: [AppColors.emerald, AppColors.ocean],
                     ),
+                    const SizedBox(height: 32),
                   ],
                 ),
               ),
