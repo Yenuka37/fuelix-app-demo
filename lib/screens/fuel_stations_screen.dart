@@ -11,7 +11,9 @@ import '../theme/app_theme.dart';
 import '../models/user_model.dart';
 import '../models/fuel_station_model.dart';
 import '../services/station_data_service.dart';
+import '../services/tutorial_service.dart';
 import '../widgets/custom_button.dart';
+import '../widgets/tutorial_overlay.dart';
 
 // ─── Filter options ───────────────────────────────────────────────────────────
 const _kBrands = ['All', 'CPC', 'Lanka IOC', 'Sinopec'];
@@ -82,6 +84,13 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
   late AnimationController _animCtrl;
   late Animation<double> _fadeAnim;
 
+  // Tutorial keys
+  final _keyToggleView = GlobalKey();
+  final _keySearchBar = GlobalKey();
+  final _keyFilterButton = GlobalKey();
+  final _keyStationCard = GlobalKey();
+  bool _showTour = false;
+
   @override
   void initState() {
     super.initState();
@@ -93,6 +102,7 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
     _searchCtrl.addListener(() => setState(() {}));
     _animCtrl.forward();
     _initializeData();
+    _checkFuelStationsTour();
   }
 
   @override
@@ -108,6 +118,14 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
     _animCtrl.dispose();
     _mapController.dispose();
     super.dispose();
+  }
+
+  Future<void> _checkFuelStationsTour() async {
+    final seen = await TutorialService.isSeen(TutorialKey.fuelStationsTour);
+    if (!seen && mounted) {
+      await Future.delayed(const Duration(milliseconds: 700));
+      if (mounted) setState(() => _showTour = true);
+    }
   }
 
   Future<void> _initializeData() async {
@@ -137,7 +155,6 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
               'Location services are disabled. Please enable location services to see stations near you.';
           _isLoadingLocation = false;
         });
-        // Use default location to show all stations
         _updateStationsWithLocation(_defaultLocation);
         return;
       }
@@ -152,7 +169,6 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
                 'Location permission denied. Please grant location permission to see stations near you.';
             _isLoadingLocation = false;
           });
-          // Use default location to show all stations
           _updateStationsWithLocation(_defaultLocation);
           return;
         }
@@ -164,7 +180,6 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
               'Location permission permanently denied. Please enable location permission in app settings.';
           _isLoadingLocation = false;
         });
-        // Use default location to show all stations
         _updateStationsWithLocation(_defaultLocation);
         return;
       }
@@ -200,7 +215,6 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
   }
 
   void _updateStationsWithLocation(LatLng location) {
-    // Get stations within 30km radius
     final stations = _stationService.getStationsWithinRadius(
       location.latitude,
       location.longitude,
@@ -213,8 +227,6 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
         _isLoadingLocation = false;
         _useDefaultLocation = location == _defaultLocation;
       });
-
-      // Center map on location
       _mapController.move(location, _currentZoom);
     }
   }
@@ -244,7 +256,6 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
   // ── Filter logic ──────────────────────────────────────────────────────────
   List<FuelStation> get _filtered {
     if (_stationsWithinRadius.isEmpty) return [];
-
     final q = _searchCtrl.text.trim().toLowerCase();
     return _stationsWithinRadius.where((s) {
       if (q.isNotEmpty &&
@@ -283,13 +294,26 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
     });
   }
 
+  void _openDetail(FuelStation station) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _StationDetailSheet(
+        station: station,
+        userLocation: _currentLocation,
+        onDirections: () => _openDirections(station),
+      ),
+    );
+  }
+
   // ── Build ─────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final filtered = _filtered;
 
-    return Scaffold(
+    final screen = Scaffold(
       body: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -336,6 +360,54 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
               child: Icon(Icons.my_location_rounded, color: AppColors.emerald),
             )
           : null,
+    );
+
+    if (!_showTour) return screen;
+
+    return SpotlightTour(
+      steps: [
+        TourStep(
+          targetKey: _keyToggleView,
+          title: 'List / Map View',
+          body:
+              'Switch between list view and interactive map view to find fuel stations.',
+          icon: Icons.view_list_rounded,
+          gradient: [AppColors.emerald, AppColors.ocean],
+          position: TooltipPosition.below,
+        ),
+        TourStep(
+          targetKey: _keySearchBar,
+          title: 'Search Stations',
+          body:
+              'Search by station name, address, or district to quickly find what you need.',
+          icon: Icons.search_rounded,
+          gradient: [AppColors.ocean, AppColors.emerald],
+          position: TooltipPosition.below,
+        ),
+        TourStep(
+          targetKey: _keyFilterButton,
+          title: 'Filters',
+          body:
+              'Filter by brand, province, fuel type, partner status, and open now.',
+          icon: Icons.tune_rounded,
+          gradient: [AppColors.amber, AppColors.emerald],
+          position: TooltipPosition.below,
+        ),
+        TourStep(
+          targetKey: _keyStationCard,
+          title: 'Station Card',
+          body:
+              'Tap any station to see details, available fuels, amenities, and get directions.',
+          icon: Icons.local_gas_station_rounded,
+          gradient: [AppColors.emerald, AppColors.ocean],
+          position: TooltipPosition.above,
+        ),
+      ],
+      onComplete: () async {
+        await TutorialService.markSeen(TutorialKey.fuelStationsTour);
+        if (mounted) setState(() => _showTour = false);
+      },
+      child: screen,
     );
   }
 
@@ -438,32 +510,37 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
   Widget _buildViewToggle(bool isDark) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-      child: Container(
-        padding: const EdgeInsets.all(4),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(14),
-          color: isDark ? AppColors.darkSurfaceAlt : AppColors.lightSurfaceAlt,
-          border: Border.all(
-            color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+      child: KeyedSubtree(
+        key: _keyToggleView,
+        child: Container(
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            color: isDark
+                ? AppColors.darkSurfaceAlt
+                : AppColors.lightSurfaceAlt,
+            border: Border.all(
+              color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+            ),
           ),
-        ),
-        child: Row(
-          children: [
-            _ToggleButton(
-              label: 'List View',
-              icon: Icons.list_rounded,
-              isSelected: _isListView,
-              isDark: isDark,
-              onTap: () => setState(() => _isListView = true),
-            ),
-            _ToggleButton(
-              label: 'Map View',
-              icon: Icons.map_rounded,
-              isSelected: !_isListView,
-              isDark: isDark,
-              onTap: () => setState(() => _isListView = false),
-            ),
-          ],
+          child: Row(
+            children: [
+              _ToggleButton(
+                label: 'List View',
+                icon: Icons.list_rounded,
+                isSelected: _isListView,
+                isDark: isDark,
+                onTap: () => setState(() => _isListView = true),
+              ),
+              _ToggleButton(
+                label: 'Map View',
+                icon: Icons.map_rounded,
+                isSelected: !_isListView,
+                isDark: isDark,
+                onTap: () => setState(() => _isListView = false),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -480,11 +557,6 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
       options: MapOptions(
         initialCenter: _currentLocation ?? _defaultLocation,
         initialZoom: _currentZoom,
-        onMapEvent: (event) {
-          if (event is MapEventMove) {
-            // User is interacting with map
-          }
-        },
       ),
       children: [
         TileLayer(
@@ -605,119 +677,133 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
       child: Row(
         children: [
           Expanded(
-            child: Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(14),
-                color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-                border: Border.all(
-                  color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-                  width: 1.5,
+            child: KeyedSubtree(
+              key: _keySearchBar,
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  color: isDark
+                      ? AppColors.darkSurface
+                      : AppColors.lightSurface,
+                  border: Border.all(
+                    color: isDark
+                        ? AppColors.darkBorder
+                        : AppColors.lightBorder,
+                    width: 1.5,
+                  ),
                 ),
-              ),
-              child: TextField(
-                controller: _searchCtrl,
-                style: GoogleFonts.inter(
-                  fontSize: 14,
-                  color: isDark ? AppColors.darkText : AppColors.lightText,
-                ),
-                decoration: InputDecoration(
-                  hintText: 'Search stations, districts...',
-                  hintStyle: GoogleFonts.inter(
+                child: TextField(
+                  controller: _searchCtrl,
+                  style: GoogleFonts.inter(
                     fontSize: 14,
-                    color: isDark
-                        ? AppColors.darkTextMuted
-                        : AppColors.lightTextMuted,
+                    color: isDark ? AppColors.darkText : AppColors.lightText,
                   ),
-                  prefixIcon: Icon(
-                    Icons.search_rounded,
-                    size: 20,
-                    color: isDark
-                        ? AppColors.darkTextSub
-                        : AppColors.lightTextSub,
-                  ),
-                  suffixIcon: _searchCtrl.text.isNotEmpty
-                      ? GestureDetector(
-                          onTap: () {
-                            _searchCtrl.clear();
-                            FocusScope.of(context).unfocus();
-                          },
-                          child: Icon(
-                            Icons.close_rounded,
-                            size: 18,
-                            color: isDark
-                                ? AppColors.darkTextSub
-                                : AppColors.lightTextSub,
-                          ),
-                        )
-                      : null,
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 14,
+                  decoration: InputDecoration(
+                    hintText: 'Search stations, districts...',
+                    hintStyle: GoogleFonts.inter(
+                      fontSize: 14,
+                      color: isDark
+                          ? AppColors.darkTextMuted
+                          : AppColors.lightTextMuted,
+                    ),
+                    prefixIcon: Icon(
+                      Icons.search_rounded,
+                      size: 20,
+                      color: isDark
+                          ? AppColors.darkTextSub
+                          : AppColors.lightTextSub,
+                    ),
+                    suffixIcon: _searchCtrl.text.isNotEmpty
+                        ? GestureDetector(
+                            onTap: () {
+                              _searchCtrl.clear();
+                              FocusScope.of(context).unfocus();
+                            },
+                            child: Icon(
+                              Icons.close_rounded,
+                              size: 18,
+                              color: isDark
+                                  ? AppColors.darkTextSub
+                                  : AppColors.lightTextSub,
+                            ),
+                          )
+                        : null,
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 14,
+                    ),
                   ),
                 ),
               ),
             ),
           ),
           const SizedBox(width: 10),
-          GestureDetector(
-            onTap: () => setState(() => _showFilters = !_showFilters),
-            child: Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(14),
-                gradient: _showFilters || _activeFilterCount > 0
-                    ? const LinearGradient(
-                        colors: [AppColors.emerald, AppColors.ocean],
-                      )
-                    : null,
-                color: _showFilters || _activeFilterCount > 0
-                    ? null
-                    : (isDark ? AppColors.darkSurface : AppColors.lightSurface),
-                border: Border.all(
+          KeyedSubtree(
+            key: _keyFilterButton,
+            child: GestureDetector(
+              onTap: () => setState(() => _showFilters = !_showFilters),
+              child: Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  gradient: _showFilters || _activeFilterCount > 0
+                      ? const LinearGradient(
+                          colors: [AppColors.emerald, AppColors.ocean],
+                        )
+                      : null,
                   color: _showFilters || _activeFilterCount > 0
-                      ? Colors.transparent
-                      : (isDark ? AppColors.darkBorder : AppColors.lightBorder),
-                  width: 1.5,
-                ),
-              ),
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  Icon(
-                    Icons.tune_rounded,
-                    size: 20,
+                      ? null
+                      : (isDark
+                            ? AppColors.darkSurface
+                            : AppColors.lightSurface),
+                  border: Border.all(
                     color: _showFilters || _activeFilterCount > 0
-                        ? Colors.white
+                        ? Colors.transparent
                         : (isDark
-                              ? AppColors.darkTextSub
-                              : AppColors.lightTextSub),
+                              ? AppColors.darkBorder
+                              : AppColors.lightBorder),
+                    width: 1.5,
                   ),
-                  if (_activeFilterCount > 0)
-                    Positioned(
-                      top: 6,
-                      right: 6,
-                      child: Container(
-                        width: 14,
-                        height: 14,
-                        decoration: const BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: AppColors.amber,
-                        ),
-                        child: Center(
-                          child: Text(
-                            '$_activeFilterCount',
-                            style: GoogleFonts.spaceGrotesk(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w800,
-                              color: Colors.white,
+                ),
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Icon(
+                      Icons.tune_rounded,
+                      size: 20,
+                      color: _showFilters || _activeFilterCount > 0
+                          ? Colors.white
+                          : (isDark
+                                ? AppColors.darkTextSub
+                                : AppColors.lightTextSub),
+                    ),
+                    if (_activeFilterCount > 0)
+                      Positioned(
+                        top: 6,
+                        right: 6,
+                        child: Container(
+                          width: 14,
+                          height: 14,
+                          decoration: const BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: AppColors.amber,
+                          ),
+                          child: Center(
+                            child: Text(
+                              '$_activeFilterCount',
+                              style: GoogleFonts.spaceGrotesk(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w800,
+                                color: Colors.white,
+                              ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -991,25 +1077,16 @@ class _FuelStationsScreenState extends State<FuelStationsScreen>
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
       itemCount: stations.length,
       separatorBuilder: (_, __) => const SizedBox(height: 12),
-      itemBuilder: (_, i) => _StationListCard(
-        station: stations[i],
-        isDark: isDark,
-        onTap: () => _openDetail(stations[i]),
-      ),
-    );
-  }
-
-  // ── Detail sheet ──────────────────────────────────────────────────────────
-  void _openDetail(FuelStation station) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _StationDetailSheet(
-        station: station,
-        userLocation: _currentLocation,
-        onDirections: () => _openDirections(station),
-      ),
+      itemBuilder: (_, i) {
+        return KeyedSubtree(
+          key: i == 0 ? _keyStationCard : null,
+          child: _StationListCard(
+            station: stations[i],
+            isDark: isDark,
+            onTap: () => _openDetail(stations[i]),
+          ),
+        );
+      },
     );
   }
 
@@ -1551,8 +1628,6 @@ class _StationDetailSheet extends StatelessWidget {
                 ),
               ),
             ),
-
-            // ── Hero card ────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: Container(
@@ -1749,8 +1824,6 @@ class _StationDetailSheet extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 20),
-
-            // ── Operating hours ───────────────────────────────────────
             _DetailSection(
               title: 'OPERATING HOURS',
               accentColor: AppColors.amber,
@@ -1840,8 +1913,6 @@ class _StationDetailSheet extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 14),
-
-            // ── Available fuels ───────────────────────────────────────
             _DetailSection(
               title: 'AVAILABLE FUELS',
               accentColor: AppColors.emerald,
@@ -1891,8 +1962,6 @@ class _StationDetailSheet extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 14),
-
-            // ── Amenities ─────────────────────────────────────────────
             _DetailSection(
               title: 'AMENITIES',
               accentColor: AppColors.ocean,
@@ -1940,8 +2009,6 @@ class _StationDetailSheet extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 14),
-
-            // ── Location info with map preview ────────────────────────
             _DetailSection(
               title: 'LOCATION',
               accentColor: const Color(0xFF7C3AED),
@@ -2048,8 +2115,6 @@ class _StationDetailSheet extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 14),
-
-            // ── Get Directions Button ───────────────────────────────────
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: GradientButton(
@@ -2059,8 +2124,6 @@ class _StationDetailSheet extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
-
-            // ── Fuelix partner notice ────────────────────────────────
             if (station.isFuelixPartner) ...[
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 24),

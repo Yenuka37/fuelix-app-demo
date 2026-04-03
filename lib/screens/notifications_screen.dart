@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:fuelix_app/widgets/custom_button.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
+import '../services/tutorial_service.dart';
+import '../widgets/tutorial_overlay.dart';
 
 class NotificationModel {
   final String id;
@@ -9,7 +11,7 @@ class NotificationModel {
   final String message;
   final DateTime timestamp;
   final bool isRead;
-  final String? type; // 'fuel_log', 'topup', 'quota', 'system'
+  final String? type;
 
   NotificationModel({
     required this.id,
@@ -49,6 +51,11 @@ class _NotificationsScreenState extends State<NotificationsScreen>
   late AnimationController _animCtrl;
   late Animation<double> _fadeAnim;
 
+  // Tutorial keys
+  final _keyNotificationList = GlobalKey();
+  final _keyMenuButton = GlobalKey();
+  bool _showTour = false;
+
   @override
   void initState() {
     super.initState();
@@ -59,6 +66,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
     _fadeAnim = CurvedAnimation(parent: _animCtrl, curve: Curves.easeOut);
     _loadNotifications();
     _animCtrl.forward();
+    _checkNotificationsTour();
   }
 
   @override
@@ -67,8 +75,15 @@ class _NotificationsScreenState extends State<NotificationsScreen>
     super.dispose();
   }
 
+  Future<void> _checkNotificationsTour() async {
+    final seen = await TutorialService.isSeen(TutorialKey.notificationsTour);
+    if (!seen && mounted) {
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (mounted) setState(() => _showTour = true);
+    }
+  }
+
   Future<void> _loadNotifications() async {
-    // Mock data - replace with actual API call later
     await Future.delayed(const Duration(milliseconds: 500));
     setState(() {
       _notifications = [
@@ -134,7 +149,6 @@ class _NotificationsScreenState extends State<NotificationsScreen>
         );
       }
     });
-    // TODO: Call API to mark as read
   }
 
   Future<void> _markAllAsRead() async {
@@ -200,7 +214,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return Scaffold(
+    final screen = Scaffold(
       body: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -252,48 +266,51 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                       ),
                     ),
                     if (_notifications.isNotEmpty)
-                      PopupMenuButton<String>(
-                        onSelected: (value) {
-                          if (value == 'mark_all') {
-                            _markAllAsRead();
-                          } else if (value == 'clear_all') {
-                            _clearAll();
-                          }
-                        },
-                        color: isDark
-                            ? AppColors.darkSurface
-                            : AppColors.lightSurface,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        icon: Icon(
-                          Icons.more_vert_rounded,
+                      KeyedSubtree(
+                        key: _keyMenuButton,
+                        child: PopupMenuButton<String>(
+                          onSelected: (value) {
+                            if (value == 'mark_all') {
+                              _markAllAsRead();
+                            } else if (value == 'clear_all') {
+                              _clearAll();
+                            }
+                          },
                           color: isDark
-                              ? AppColors.darkTextSub
-                              : AppColors.lightTextSub,
+                              ? AppColors.darkSurface
+                              : AppColors.lightSurface,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          icon: Icon(
+                            Icons.more_vert_rounded,
+                            color: isDark
+                                ? AppColors.darkTextSub
+                                : AppColors.lightTextSub,
+                          ),
+                          itemBuilder: (context) => [
+                            const PopupMenuItem(
+                              value: 'mark_all',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.done_all_rounded, size: 18),
+                                  SizedBox(width: 10),
+                                  Text('Mark all as read'),
+                                ],
+                              ),
+                            ),
+                            const PopupMenuItem(
+                              value: 'clear_all',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.delete_outline_rounded, size: 18),
+                                  SizedBox(width: 10),
+                                  Text('Clear all'),
+                                ],
+                              ),
+                            ),
+                          ],
                         ),
-                        itemBuilder: (context) => [
-                          const PopupMenuItem(
-                            value: 'mark_all',
-                            child: Row(
-                              children: [
-                                Icon(Icons.done_all_rounded, size: 18),
-                                SizedBox(width: 10),
-                                Text('Mark all as read'),
-                              ],
-                            ),
-                          ),
-                          const PopupMenuItem(
-                            value: 'clear_all',
-                            child: Row(
-                              children: [
-                                Icon(Icons.delete_outline_rounded, size: 18),
-                                SizedBox(width: 10),
-                                Text('Clear all'),
-                              ],
-                            ),
-                          ),
-                        ],
                       ),
                   ],
                 ),
@@ -313,16 +330,19 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                         )
                       : _notifications.isEmpty
                       ? _buildEmptyState(isDark)
-                      : ListView.separated(
-                          physics: const BouncingScrollPhysics(),
-                          padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
-                          itemCount: _notifications.length,
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(height: 10),
-                          itemBuilder: (_, i) => _NotificationCard(
-                            notification: _notifications[i],
-                            isDark: isDark,
-                            onTap: () => _markAsRead(_notifications[i].id),
+                      : KeyedSubtree(
+                          key: _keyNotificationList,
+                          child: ListView.separated(
+                            physics: const BouncingScrollPhysics(),
+                            padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
+                            itemCount: _notifications.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: 10),
+                            itemBuilder: (_, i) => _NotificationCard(
+                              notification: _notifications[i],
+                              isDark: isDark,
+                              onTap: () => _markAsRead(_notifications[i].id),
+                            ),
                           ),
                         ),
                 ),
@@ -331,6 +351,35 @@ class _NotificationsScreenState extends State<NotificationsScreen>
           ),
         ),
       ),
+    );
+
+    if (!_showTour) return screen;
+
+    return SpotlightTour(
+      steps: [
+        TourStep(
+          targetKey: _keyNotificationList,
+          title: 'Your Notifications',
+          body:
+              'Here you\'ll see all alerts: fuel log confirmations, top-up receipts, quota updates, and system messages.',
+          icon: Icons.notifications_active_rounded,
+          gradient: [AppColors.ocean, AppColors.emerald],
+          position: TooltipPosition.below,
+        ),
+        TourStep(
+          targetKey: _keyMenuButton,
+          title: 'Manage Notifications',
+          body: 'Tap here to mark all as read or clear all notifications.',
+          icon: Icons.more_vert_rounded,
+          gradient: [AppColors.emerald, AppColors.ocean],
+          position: TooltipPosition.below,
+        ),
+      ],
+      onComplete: () async {
+        await TutorialService.markSeen(TutorialKey.notificationsTour);
+        if (mounted) setState(() => _showTour = false);
+      },
+      child: screen,
     );
   }
 
@@ -417,7 +466,6 @@ class _NotificationCard extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Icon
             Container(
               width: 42,
               height: 42,
@@ -428,7 +476,6 @@ class _NotificationCard extends StatelessWidget {
               child: Icon(icon, size: 20, color: color),
             ),
             const SizedBox(width: 14),
-            // Content
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

@@ -4,7 +4,9 @@ import '../theme/app_theme.dart';
 import '../models/user_model.dart';
 import '../models/topup_model.dart';
 import '../services/api_service.dart';
+import '../services/tutorial_service.dart';
 import '../widgets/custom_button.dart';
+import '../widgets/tutorial_overlay.dart';
 
 // ─── Quick-amount presets (LKR) ───────────────────────────────────────────────
 const _kPresets = [500.0, 1000.0, 2000.0, 5000.0, 10000.0];
@@ -44,13 +46,20 @@ class _TopUpScreenState extends State<TopUpScreen>
 
   double? _selectedAmount;
   final _customCtrl = TextEditingController();
-  int _selectedMethod = 0; // index into _kMethods
+  int _selectedMethod = 0;
 
   late AnimationController _animCtrl;
   late Animation<double> _fadeAnim;
 
-  // ── Tab: 0=Top Up, 1=History ──────────────────────────────────────────────
   int _tab = 0;
+
+  // Tutorial keys
+  final _keyPresets = GlobalKey();
+  final _keyCustomAmount = GlobalKey();
+  final _keyPaymentMethods = GlobalKey();
+  final _keyTopUpButton = GlobalKey();
+  final _keyHistoryList = GlobalKey();
+  bool _showTour = false;
 
   @override
   void initState() {
@@ -60,6 +69,7 @@ class _TopUpScreenState extends State<TopUpScreen>
       duration: const Duration(milliseconds: 450),
     );
     _fadeAnim = CurvedAnimation(parent: _animCtrl, curve: Curves.easeOut);
+    _checkTopUpTour();
   }
 
   @override
@@ -79,21 +89,26 @@ class _TopUpScreenState extends State<TopUpScreen>
     super.dispose();
   }
 
+  Future<void> _checkTopUpTour() async {
+    final seen = await TutorialService.isSeen(TutorialKey.topupTour);
+    if (!seen && mounted) {
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (mounted) setState(() => _showTour = true);
+    }
+  }
+
   Future<void> _loadData() async {
     if (_user?.id == null) {
       setState(() => _loadingWallet = false);
       return;
     }
-
     _loadWallet();
     _loadTransactionHistory();
   }
 
   Future<void> _loadWallet() async {
     final result = await _apiService.getWallet(_user!.id!);
-
     if (!mounted) return;
-
     if (result['success']) {
       final data = result['data'];
       final wallet = WalletModel(
@@ -109,7 +124,6 @@ class _TopUpScreenState extends State<TopUpScreen>
       });
     } else {
       setState(() => _loadingWallet = false);
-      // Show error but don't block UI
       if (mounted) {
         showAppSnackbar(
           context,
@@ -122,9 +136,7 @@ class _TopUpScreenState extends State<TopUpScreen>
 
   Future<void> _loadTransactionHistory() async {
     final result = await _apiService.getTopUpTransactions(_user!.id!);
-
     if (!mounted) return;
-
     if (result['success']) {
       List<dynamic> transactionsJson = result['data'];
       List<TopUpTransactionModel> transactions = transactionsJson
@@ -140,10 +152,8 @@ class _TopUpScreenState extends State<TopUpScreen>
             ),
           )
           .toList();
-
       setState(() => _history = transactions);
     }
-
     _animCtrl.forward(from: 0);
   }
 
@@ -160,7 +170,6 @@ class _TopUpScreenState extends State<TopUpScreen>
     }
   }
 
-  // ── Derive effective amount ───────────────────────────────────────────────
   double? get _effectiveAmount {
     if (_selectedAmount != null) return _selectedAmount;
     final v = double.tryParse(_customCtrl.text.trim());
@@ -168,7 +177,6 @@ class _TopUpScreenState extends State<TopUpScreen>
     return null;
   }
 
-  // ── Process top-up ────────────────────────────────────────────────────────
   Future<void> _processTopUp() async {
     final amount = _effectiveAmount;
     if (amount == null) {
@@ -179,27 +187,20 @@ class _TopUpScreenState extends State<TopUpScreen>
       );
       return;
     }
-
     setState(() => _processing = true);
-
     final result = await _apiService.topUpWallet(
       _user!.id!,
       amount,
       _kMethods[_selectedMethod].label,
     );
-
     if (!mounted) return;
-
     if (result['success']) {
-      // Reload wallet and history after successful top-up
       await Future.wait([_loadWallet(), _loadTransactionHistory()]);
-
       setState(() {
         _selectedAmount = null;
         _customCtrl.clear();
-        _tab = 1; // Switch to history tab after successful top-up
+        _tab = 1;
       });
-
       _showSuccessSheet(amount);
     } else {
       showAppSnackbar(
@@ -208,7 +209,6 @@ class _TopUpScreenState extends State<TopUpScreen>
         isError: true,
       );
     }
-
     setState(() => _processing = false);
   }
 
@@ -225,12 +225,11 @@ class _TopUpScreenState extends State<TopUpScreen>
     );
   }
 
-  // ── Build ─────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return Scaffold(
+    final screen = Scaffold(
       body: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -244,7 +243,6 @@ class _TopUpScreenState extends State<TopUpScreen>
         child: SafeArea(
           child: Column(
             children: [
-              // ── Top bar ────────────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
                 child: Row(
@@ -264,8 +262,6 @@ class _TopUpScreenState extends State<TopUpScreen>
                 ),
               ),
               const SizedBox(height: 20),
-
-              // ── Wallet balance card ────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 24),
                 child: _WalletBalanceCard(
@@ -275,8 +271,6 @@ class _TopUpScreenState extends State<TopUpScreen>
                 ),
               ),
               const SizedBox(height: 20),
-
-              // ── Tab bar ────────────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 24),
                 child: _TabBar(
@@ -286,8 +280,6 @@ class _TopUpScreenState extends State<TopUpScreen>
                 ),
               ),
               const SizedBox(height: 20),
-
-              // ── Content ────────────────────────────────────────────────
               Expanded(
                 child: FadeTransition(
                   opacity: _fadeAnim,
@@ -307,14 +299,76 @@ class _TopUpScreenState extends State<TopUpScreen>
                           onMethodSelect: (i) =>
                               setState(() => _selectedMethod = i),
                           onTopUp: _processTopUp,
+                          presetKey: _keyPresets,
+                          customKey: _keyCustomAmount,
+                          methodsKey: _keyPaymentMethods,
+                          buttonKey: _keyTopUpButton,
                         )
-                      : _HistoryList(history: _history, isDark: isDark),
+                      : KeyedSubtree(
+                          key: _keyHistoryList,
+                          child: _HistoryList(
+                            history: _history,
+                            isDark: isDark,
+                          ),
+                        ),
                 ),
               ),
             ],
           ),
         ),
       ),
+    );
+
+    if (!_showTour) return screen;
+
+    return SpotlightTour(
+      steps: [
+        TourStep(
+          targetKey: _keyPresets,
+          title: 'Quick Amounts',
+          body: 'Tap any preset amount to top up your wallet instantly.',
+          icon: Icons.touch_app_rounded,
+          gradient: [AppColors.ocean, AppColors.emerald],
+          position: TooltipPosition.below,
+        ),
+        TourStep(
+          targetKey: _keyCustomAmount,
+          title: 'Custom Amount',
+          body: 'Enter any amount above LKR 100 if presets don\'t match.',
+          icon: Icons.edit_note_rounded,
+          gradient: [AppColors.emerald, AppColors.ocean],
+          position: TooltipPosition.below,
+        ),
+        TourStep(
+          targetKey: _keyPaymentMethods,
+          title: 'Payment Method',
+          body: 'Choose your preferred payment method. All are secure.',
+          icon: Icons.payment_rounded,
+          gradient: [AppColors.amber, AppColors.emerald],
+          position: TooltipPosition.below,
+        ),
+        TourStep(
+          targetKey: _keyTopUpButton,
+          title: 'Complete Top Up',
+          body: 'Tap to add credits to your wallet. Funds are added instantly.',
+          icon: Icons.add_card_rounded,
+          gradient: [AppColors.emerald, AppColors.ocean],
+          position: TooltipPosition.above,
+        ),
+        TourStep(
+          targetKey: _keyHistoryList,
+          title: 'Transaction History',
+          body: 'View all your past top-ups and their status here.',
+          icon: Icons.history_rounded,
+          gradient: [AppColors.ocean, AppColors.emerald],
+          position: TooltipPosition.below,
+        ),
+      ],
+      onComplete: () async {
+        await TutorialService.markSeen(TutorialKey.topupTour);
+        if (mounted) setState(() => _showTour = false);
+      },
+      child: screen,
     );
   }
 
@@ -336,9 +390,7 @@ class _TopUpScreenState extends State<TopUpScreen>
   );
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// Wallet Balance Card
-// ═════════════════════════════════════════════════════════════════════════════
+// ─── Wallet Balance Card ──────────────────────────────────────────────────────
 class _WalletBalanceCard extends StatelessWidget {
   final WalletModel? wallet;
   final bool loading, isDark;
@@ -410,7 +462,6 @@ class _WalletBalanceCard extends StatelessWidget {
                   ],
                 ),
               ),
-              // Verified badge
               Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 10,
@@ -421,7 +472,6 @@ class _WalletBalanceCard extends StatelessWidget {
                   color: Colors.white.withOpacity(0.15),
                 ),
                 child: Row(
-                  mainAxisSize: MainAxisSize.min,
                   children: [
                     const Icon(
                       Icons.verified_rounded,
@@ -443,7 +493,6 @@ class _WalletBalanceCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 20),
-          // Balance display
           loading
               ? const SizedBox(
                   width: 24,
@@ -476,9 +525,7 @@ class _WalletBalanceCard extends StatelessWidget {
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// Tab Bar
-// ═════════════════════════════════════════════════════════════════════════════
+// ─── Tab Bar ──────────────────────────────────────────────────────────────────
 class _TabBar extends StatelessWidget {
   final int selected;
   final bool isDark;
@@ -570,9 +617,7 @@ class _TabItem extends StatelessWidget {
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// Top Up Form
-// ═════════════════════════════════════════════════════════════════════════════
+// ─── Top Up Form ──────────────────────────────────────────────────────────────
 class _TopUpForm extends StatelessWidget {
   final bool isDark, processing;
   final double? selectedAmount;
@@ -582,6 +627,7 @@ class _TopUpForm extends StatelessWidget {
   final VoidCallback onClearPreset;
   final ValueChanged<int> onMethodSelect;
   final VoidCallback onTopUp;
+  final Key? presetKey, customKey, methodsKey, buttonKey;
 
   const _TopUpForm({
     required this.isDark,
@@ -593,6 +639,10 @@ class _TopUpForm extends StatelessWidget {
     required this.onClearPreset,
     required this.onMethodSelect,
     required this.onTopUp,
+    this.presetKey,
+    this.customKey,
+    this.methodsKey,
+    this.buttonKey,
   });
 
   @override
@@ -603,162 +653,174 @@ class _TopUpForm extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Amount section ────────────────────────────────────────────
           _SectionLabel('Select Amount', isDark),
-          // Preset chips
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: _kPresets.map((a) {
-              final selected = a == selectedAmount;
-              return GestureDetector(
-                onTap: () => onPreset(a),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 18,
-                    vertical: 12,
-                  ),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    gradient: selected
-                        ? const LinearGradient(
-                            colors: [Color(0xFF7C3AED), Color(0xFF0A84FF)],
-                          )
-                        : null,
-                    color: selected
-                        ? null
-                        : (isDark
-                              ? AppColors.darkSurface
-                              : AppColors.lightSurface),
-                    border: Border.all(
+          KeyedSubtree(
+            key: presetKey,
+            child: Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: _kPresets.map((a) {
+                final selected = a == selectedAmount;
+                return GestureDetector(
+                  onTap: () => onPreset(a),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 18,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                      gradient: selected
+                          ? const LinearGradient(
+                              colors: [Color(0xFF7C3AED), Color(0xFF0A84FF)],
+                            )
+                          : null,
                       color: selected
-                          ? Colors.transparent
+                          ? null
                           : (isDark
-                                ? AppColors.darkBorder
-                                : AppColors.lightBorder),
-                      width: 1.5,
+                                ? AppColors.darkSurface
+                                : AppColors.lightSurface),
+                      border: Border.all(
+                        color: selected
+                            ? Colors.transparent
+                            : (isDark
+                                  ? AppColors.darkBorder
+                                  : AppColors.lightBorder),
+                        width: 1.5,
+                      ),
+                      boxShadow: selected
+                          ? [
+                              BoxShadow(
+                                color: const Color(
+                                  0xFF7C3AED,
+                                ).withOpacity(0.25),
+                                blurRadius: 10,
+                                offset: const Offset(0, 4),
+                              ),
+                            ]
+                          : null,
                     ),
-                    boxShadow: selected
-                        ? [
-                            BoxShadow(
-                              color: const Color(0xFF7C3AED).withOpacity(0.25),
-                              blurRadius: 10,
-                              offset: const Offset(0, 4),
-                            ),
-                          ]
-                        : null,
-                  ),
-                  child: Text(
-                    'LKR ${a.toStringAsFixed(0)}',
-                    style: GoogleFonts.spaceGrotesk(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: selected
-                          ? Colors.white
-                          : (isDark ? AppColors.darkText : AppColors.lightText),
+                    child: Text(
+                      'LKR ${a.toStringAsFixed(0)}',
+                      style: GoogleFonts.spaceGrotesk(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: selected
+                            ? Colors.white
+                            : (isDark
+                                  ? AppColors.darkText
+                                  : AppColors.lightText),
+                      ),
                     ),
                   ),
-                ),
-              );
-            }).toList(),
+                );
+              }).toList(),
+            ),
           ),
           const SizedBox(height: 16),
-          // Custom amount input
-          _CustomAmountField(
-            controller: customCtrl,
-            isDark: isDark,
-            onChanged: (_) => onClearPreset(),
+          KeyedSubtree(
+            key: customKey,
+            child: _CustomAmountField(
+              controller: customCtrl,
+              isDark: isDark,
+              onChanged: (_) => onClearPreset(),
+            ),
           ),
           const SizedBox(height: 24),
-
-          // ── Payment method ────────────────────────────────────────────
           _SectionLabel('Payment Method', isDark),
-          Column(
-            children: List.generate(_kMethods.length, (i) {
-              final method = _kMethods[i];
-              final sel = i == selectedMethod;
-              return GestureDetector(
-                onTap: () => onMethodSelect(i),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  margin: const EdgeInsets.only(bottom: 10),
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(14),
-                    color: sel
-                        ? method.color.withOpacity(isDark ? 0.14 : 0.08)
-                        : (isDark
-                              ? AppColors.darkSurface
-                              : AppColors.lightSurface),
-                    border: Border.all(
+          KeyedSubtree(
+            key: methodsKey,
+            child: Column(
+              children: List.generate(_kMethods.length, (i) {
+                final method = _kMethods[i];
+                final sel = i == selectedMethod;
+                return GestureDetector(
+                  onTap: () => onMethodSelect(i),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(14),
                       color: sel
-                          ? method.color.withOpacity(0.5)
+                          ? method.color.withOpacity(isDark ? 0.14 : 0.08)
                           : (isDark
-                                ? AppColors.darkBorder
-                                : AppColors.lightBorder),
-                      width: sel ? 1.5 : 1,
+                                ? AppColors.darkSurface
+                                : AppColors.lightSurface),
+                      border: Border.all(
+                        color: sel
+                            ? method.color.withOpacity(0.5)
+                            : (isDark
+                                  ? AppColors.darkBorder
+                                  : AppColors.lightBorder),
+                        width: sel ? 1.5 : 1,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(11),
+                            color: method.color.withOpacity(
+                              isDark ? 0.18 : 0.10,
+                            ),
+                          ),
+                          child: Icon(
+                            method.icon,
+                            size: 20,
+                            color: method.color,
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Text(
+                            method.label,
+                            style: GoogleFonts.spaceGrotesk(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: sel
+                                  ? method.color
+                                  : (isDark
+                                        ? AppColors.darkText
+                                        : AppColors.lightText),
+                            ),
+                          ),
+                        ),
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          width: 20,
+                          height: 20,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: sel
+                                  ? method.color
+                                  : (isDark
+                                        ? AppColors.darkBorder
+                                        : AppColors.lightBorder),
+                              width: 2,
+                            ),
+                            color: sel ? method.color : Colors.transparent,
+                          ),
+                          child: sel
+                              ? const Icon(
+                                  Icons.check_rounded,
+                                  size: 11,
+                                  color: Colors.white,
+                                )
+                              : null,
+                        ),
+                      ],
                     ),
                   ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(11),
-                          color: method.color.withOpacity(isDark ? 0.18 : 0.10),
-                        ),
-                        child: Icon(method.icon, size: 20, color: method.color),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Text(
-                          method.label,
-                          style: GoogleFonts.spaceGrotesk(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: sel
-                                ? method.color
-                                : (isDark
-                                      ? AppColors.darkText
-                                      : AppColors.lightText),
-                          ),
-                        ),
-                      ),
-                      AnimatedContainer(
-                        duration: const Duration(milliseconds: 180),
-                        width: 20,
-                        height: 20,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: sel
-                                ? method.color
-                                : (isDark
-                                      ? AppColors.darkBorder
-                                      : AppColors.lightBorder),
-                            width: 2,
-                          ),
-                          color: sel ? method.color : Colors.transparent,
-                        ),
-                        child: sel
-                            ? const Icon(
-                                Icons.check_rounded,
-                                size: 11,
-                                color: Colors.white,
-                              )
-                            : null,
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            }),
+                );
+              }),
+            ),
           ),
           const SizedBox(height: 10),
-
-          // ── Info notice ───────────────────────────────────────────────
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
@@ -767,7 +829,6 @@ class _TopUpForm extends StatelessWidget {
               border: Border.all(color: AppColors.ocean.withOpacity(0.2)),
             ),
             child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Icon(
                   Icons.info_outline_rounded,
@@ -777,9 +838,7 @@ class _TopUpForm extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'Top-up credits are added instantly to your Fuelix Wallet. '
-                    'Credits can be used to pay at partnered fuel stations '
-                    'via your vehicle Fuel Pass.',
+                    'Top-up credits are added instantly to your Fuelix Wallet. Credits can be used to pay at partnered fuel stations via your vehicle Fuel Pass.',
                     style: GoogleFonts.inter(
                       fontSize: 12,
                       color: AppColors.ocean,
@@ -791,13 +850,14 @@ class _TopUpForm extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 24),
-
-          // ── Top-up button ─────────────────────────────────────────────
-          GradientButton(
-            label: 'Top Up Now',
-            onPressed: onTopUp,
-            isLoading: processing,
-            colors: const [Color(0xFF7C3AED), Color(0xFF0A84FF)],
+          KeyedSubtree(
+            key: buttonKey,
+            child: GradientButton(
+              label: 'Top Up Now',
+              onPressed: onTopUp,
+              isLoading: processing,
+              colors: const [Color(0xFF7C3AED), Color(0xFF0A84FF)],
+            ),
           ),
         ],
       ),
@@ -824,7 +884,6 @@ class _CustomAmountField extends StatelessWidget {
     final hintColor = isDark
         ? AppColors.darkTextMuted
         : AppColors.lightTextMuted;
-
     return TextFormField(
       controller: controller,
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -866,9 +925,7 @@ class _CustomAmountField extends StatelessWidget {
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// Transaction History List
-// ═════════════════════════════════════════════════════════════════════════════
+// ─── Transaction History List ─────────────────────────────────────────────────
 class _HistoryList extends StatelessWidget {
   final List<TopUpTransactionModel> history;
   final bool isDark;
@@ -922,7 +979,6 @@ class _HistoryList extends StatelessWidget {
         ),
       );
     }
-
     return ListView.separated(
       physics: const BouncingScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
@@ -976,7 +1032,6 @@ class _TransactionTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = _methodColor(tx.method);
     final isOk = tx.status == TopUpStatus.completed;
-
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -988,7 +1043,6 @@ class _TransactionTile extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // Method icon
           Container(
             width: 42,
             height: 42,
@@ -999,7 +1053,6 @@ class _TransactionTile extends StatelessWidget {
             child: Icon(_methodIcon(tx.method), size: 20, color: color),
           ),
           const SizedBox(width: 14),
-          // Details
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1038,7 +1091,6 @@ class _TransactionTile extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 10),
-          // Amount + status
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
@@ -1075,9 +1127,7 @@ class _TransactionTile extends StatelessWidget {
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// Success Bottom Sheet
-// ═════════════════════════════════════════════════════════════════════════════
+// ─── Success Bottom Sheet ─────────────────────────────────────────────────────
 class _SuccessSheet extends StatelessWidget {
   final double amount, balance;
   final bool isDark;
@@ -1107,7 +1157,6 @@ class _SuccessSheet extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 32),
-          // Checkmark
           Container(
             width: 80,
             height: 80,
@@ -1192,12 +1241,10 @@ class _SuccessSheet extends StatelessWidget {
   }
 }
 
-// ─── Section label ────────────────────────────────────────────────────────────
 class _SectionLabel extends StatelessWidget {
   final String text;
   final bool isDark;
   const _SectionLabel(this.text, this.isDark);
-
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(bottom: 12),

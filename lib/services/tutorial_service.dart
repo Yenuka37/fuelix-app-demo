@@ -7,6 +7,11 @@ enum TutorialKey {
   vehiclesTour, // Vehicles screen tour
   topupTour, // Top-up screen tour
   fuelPassTour, // Fuel pass QR tour
+  fuelLogTour, // Fuel log screen tour (NEW)
+  notificationsTour, // Notifications screen tour (NEW)
+  forgotPasswordTour, // Forgot password screen tour (NEW)
+  deleteAccountTour, // Delete account screen tour (NEW)
+  fuelStationsTour, // Fuel stations screen tour (NEW)
 }
 
 class TutorialService {

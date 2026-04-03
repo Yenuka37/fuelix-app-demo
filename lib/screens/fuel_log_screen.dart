@@ -7,9 +7,11 @@ import '../models/vehicle_model.dart';
 import '../models/topup_model.dart';
 import '../models/fuel_log_model.dart';
 import '../services/api_service.dart';
+import '../services/tutorial_service.dart';
 import '../widgets/custom_button.dart';
+import '../widgets/tutorial_overlay.dart';
 
-// Fuel grade catalogue (same as in home_screen)
+// Fuel grade catalogue
 class FuelGrade {
   final String name;
   final double pricePerLitre;
@@ -75,6 +77,13 @@ class _FuelLogScreenState extends State<FuelLogScreen>
   late AnimationController _animCtrl;
   late Animation<double> _fadeAnim;
 
+  // Tutorial keys
+  final _keyVehicleSelector = GlobalKey();
+  final _keyGradeSelector = GlobalKey();
+  final _keyLitresField = GlobalKey();
+  final _keySaveButton = GlobalKey();
+  bool _showTour = false;
+
   double get _maxLitres {
     if (_selectedGrade == null) return _quotaRemaining;
     final walletLitres = _walletBalance / _selectedGrade!.pricePerLitre;
@@ -99,6 +108,7 @@ class _FuelLogScreenState extends State<FuelLogScreen>
     _litresCtrl.addListener(() => setState(() {}));
     _refreshGradesAndLimits();
     _animCtrl.forward();
+    _checkFuelLogTour();
   }
 
   @override
@@ -107,6 +117,14 @@ class _FuelLogScreenState extends State<FuelLogScreen>
     _stationCtrl.dispose();
     _animCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _checkFuelLogTour() async {
+    final seen = await TutorialService.isSeen(TutorialKey.fuelLogTour);
+    if (!seen && mounted) {
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (mounted) setState(() => _showTour = true);
+    }
   }
 
   Future<void> _refreshGradesAndLimits() async {
@@ -192,7 +210,7 @@ class _FuelLogScreenState extends State<FuelLogScreen>
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return Scaffold(
+    final screen = Scaffold(
       body: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -265,17 +283,20 @@ class _FuelLogScreenState extends State<FuelLogScreen>
                           // Vehicle selector
                           _sectionLabel('Vehicle', isDark),
                           const SizedBox(height: 8),
-                          _dropdown<VehicleModel>(
-                            isDark: isDark,
-                            value: _selectedVehicle,
-                            items: widget.vehicles,
-                            itemLabel: (v) =>
-                                '${v.shortDisplay} · ${v.registrationNo}',
-                            onChanged: (v) async {
-                              if (v == null) return;
-                              setState(() => _selectedVehicle = v);
-                              await _refreshGradesAndLimits();
-                            },
+                          KeyedSubtree(
+                            key: _keyVehicleSelector,
+                            child: _dropdown<VehicleModel>(
+                              isDark: isDark,
+                              value: _selectedVehicle,
+                              items: widget.vehicles,
+                              itemLabel: (v) =>
+                                  '${v.shortDisplay} · ${v.registrationNo}',
+                              onChanged: (v) async {
+                                if (v == null) return;
+                                setState(() => _selectedVehicle = v);
+                                await _refreshGradesAndLimits();
+                              },
+                            ),
                           ),
                           const SizedBox(height: 20),
 
@@ -300,13 +321,19 @@ class _FuelLogScreenState extends State<FuelLogScreen>
                           ] else ...[
                             _sectionLabel('Fuel Grade', isDark),
                             const SizedBox(height: 10),
-                            _buildGradeSelector(isDark),
+                            KeyedSubtree(
+                              key: _keyGradeSelector,
+                              child: _buildGradeSelector(isDark),
+                            ),
                             const SizedBox(height: 20),
 
                             // Litres field
                             _sectionLabel('Litres Filled', isDark),
                             const SizedBox(height: 8),
-                            _buildLitresField(isDark),
+                            KeyedSubtree(
+                              key: _keyLitresField,
+                              child: _buildLitresField(isDark),
+                            ),
                             const SizedBox(height: 20),
 
                             // Station name
@@ -323,12 +350,15 @@ class _FuelLogScreenState extends State<FuelLogScreen>
                             const SizedBox(height: 8),
 
                             // Save button
-                            GradientButton(
-                              label: 'Save Fuel Log',
-                              onPressed: (_limitsLoaded && _maxLitres > 0)
-                                  ? _save
-                                  : null,
-                              isLoading: _isSaving,
+                            KeyedSubtree(
+                              key: _keySaveButton,
+                              child: GradientButton(
+                                label: 'Save Fuel Log',
+                                onPressed: (_limitsLoaded && _maxLitres > 0)
+                                    ? _save
+                                    : null,
+                                isLoading: _isSaving,
+                              ),
                             ),
                           ],
                         ],
@@ -341,6 +371,52 @@ class _FuelLogScreenState extends State<FuelLogScreen>
           ),
         ),
       ),
+    );
+
+    if (!_showTour) return screen;
+
+    return SpotlightTour(
+      steps: [
+        TourStep(
+          targetKey: _keyVehicleSelector,
+          title: 'Select Vehicle',
+          body:
+              'Choose the vehicle you refueled. Each vehicle has its own quota.',
+          icon: Icons.directions_car_rounded,
+          gradient: [AppColors.ocean, AppColors.emerald],
+          position: TooltipPosition.below,
+        ),
+        TourStep(
+          targetKey: _keyGradeSelector,
+          title: 'Choose Fuel Grade',
+          body: 'Select the correct fuel grade. Prices are fixed per grade.',
+          icon: Icons.local_gas_station_rounded,
+          gradient: [AppColors.emerald, AppColors.ocean],
+          position: TooltipPosition.below,
+        ),
+        TourStep(
+          targetKey: _keyLitresField,
+          title: 'Enter Litres',
+          body:
+              'Input the exact litres filled. Check quota and wallet limits above.',
+          icon: Icons.opacity_rounded,
+          gradient: [AppColors.amber, AppColors.emerald],
+          position: TooltipPosition.below,
+        ),
+        TourStep(
+          targetKey: _keySaveButton,
+          title: 'Save Fuel Log',
+          body: 'Tap to record your refuel. Quota and wallet will be updated.',
+          icon: Icons.save_rounded,
+          gradient: [AppColors.emerald, AppColors.ocean],
+          position: TooltipPosition.above,
+        ),
+      ],
+      onComplete: () async {
+        await TutorialService.markSeen(TutorialKey.fuelLogTour);
+        if (mounted) setState(() => _showTour = false);
+      },
+      child: screen,
     );
   }
 

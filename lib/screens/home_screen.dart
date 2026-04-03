@@ -77,6 +77,8 @@ class _HomeScreenState extends State<HomeScreen>
   final _keyVehicles = GlobalKey();
   final _keyWallet = GlobalKey();
   final _keyActions = GlobalKey();
+  final _keyFuelLogAction = GlobalKey(); // NEW
+  final _keyNotifications = GlobalKey(); // NEW
   bool _showTour = false;
 
   @override
@@ -392,13 +394,19 @@ class _HomeScreenState extends State<HomeScreen>
                             childAspectRatio: 1.1,
                           ),
                       delegate: SliverChildListDelegate([
-                        _ActionCard(
-                          icon: Icons.local_gas_station_rounded,
-                          label: 'Fuel Log',
-                          sublabel: 'Track refuels',
-                          gradient: [AppColors.emerald, AppColors.emeraldDark],
-                          isDark: isDark,
-                          onTap: _openFuelLogScreen,
+                        KeyedSubtree(
+                          key: _keyFuelLogAction,
+                          child: _ActionCard(
+                            icon: Icons.local_gas_station_rounded,
+                            label: 'Fuel Log',
+                            sublabel: 'Track refuels',
+                            gradient: [
+                              AppColors.emerald,
+                              AppColors.emeraldDark,
+                            ],
+                            isDark: isDark,
+                            onTap: _openFuelLogScreen,
+                          ),
                         ),
                         _ActionCard(
                           icon: Icons.bar_chart_rounded,
@@ -538,11 +546,31 @@ class _HomeScreenState extends State<HomeScreen>
           targetKey: _keyActions,
           title: 'Quick Actions',
           body:
-              'Log fuel, view analytics, find fuel stations, '
-              'and top up your wallet — all from here.',
+              'Quick access to main features: Fuel Log, Analytics, '
+              'Fuel Stations, and Top Up.',
           icon: Icons.grid_view_rounded,
           gradient: [AppColors.amber, AppColors.emerald],
+          position: TooltipPosition.below,
+        ),
+        TourStep(
+          targetKey: _keyFuelLogAction,
+          title: 'Log Fuel',
+          body:
+              'Tap here to record your fuel refills. '
+              'You\'ll need a vehicle added first.',
+          icon: Icons.local_gas_station_rounded,
+          gradient: [AppColors.emerald, AppColors.ocean],
           position: TooltipPosition.above,
+        ),
+        TourStep(
+          targetKey: _keyNotifications,
+          title: 'Notifications',
+          body:
+              'Tap the bell icon to see your alerts, '
+              'fuel log confirmations, top-up receipts, and quota updates.',
+          icon: Icons.notifications_rounded,
+          gradient: [AppColors.ocean, AppColors.emerald],
+          position: TooltipPosition.below,
         ),
       ],
       onComplete: () async {
@@ -591,24 +619,27 @@ class _HomeScreenState extends State<HomeScreen>
         ),
         const Spacer(),
         // Notifications button
-        GestureDetector(
-          onTap: _goToNotifications,
-          child: Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(10),
-              color: isDark
-                  ? AppColors.darkSurfaceAlt
-                  : AppColors.lightSurfaceAlt,
-              border: Border.all(
-                color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+        KeyedSubtree(
+          key: _keyNotifications,
+          child: GestureDetector(
+            onTap: _goToNotifications,
+            child: Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                color: isDark
+                    ? AppColors.darkSurfaceAlt
+                    : AppColors.lightSurfaceAlt,
+                border: Border.all(
+                  color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                ),
               ),
-            ),
-            child: Icon(
-              Icons.notifications_outlined,
-              size: 18,
-              color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
+              child: Icon(
+                Icons.notifications_outlined,
+                size: 18,
+                color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
+              ),
             ),
           ),
         ),
