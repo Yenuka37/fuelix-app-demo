@@ -9,6 +9,8 @@ import 'screens/profile_screen.dart';
 import 'screens/vehicles_screen.dart';
 import 'screens/topup_screen.dart';
 import 'screens/fuel_stations_screen.dart';
+import 'screens/fuel_log_screen.dart'; // Add this
+import 'screens/notifications_screen.dart'; // Add this
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -40,6 +42,23 @@ class FuelixApp extends StatelessWidget {
         '/vehicles': (context) => const VehiclesScreen(),
         '/topup': (context) => const TopUpScreen(),
         '/fuel_stations': (context) => const FuelStationsScreen(),
+      },
+      // Add onGenerateRoute for screens that need arguments
+      onGenerateRoute: (settings) {
+        if (settings.name == '/fuel_log') {
+          final args = settings.arguments as Map<String, dynamic>;
+          return MaterialPageRoute(
+            builder: (_) => FuelLogScreen(
+              user: args['user'],
+              vehicles: args['vehicles'],
+              walletBalance: args['walletBalance'],
+            ),
+          );
+        }
+        if (settings.name == '/notifications') {
+          return MaterialPageRoute(builder: (_) => const NotificationsScreen());
+        }
+        return null;
       },
     );
   }
