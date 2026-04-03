@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 class FuelStation {
   final int id;
   final String name;
@@ -50,23 +52,60 @@ class FuelStation {
     'isOpen': isOpen,
   };
 
-  factory FuelStation.fromJson(Map<String, dynamic> json) => FuelStation(
-    id: json['id'] as int,
-    name: json['name'] as String,
-    brand: json['brand'] as String,
-    address: json['address'] as String,
-    district: json['district'] as String,
-    province: json['province'] as String,
-    latitude: (json['latitude'] as num).toDouble(),
-    longitude: (json['longitude'] as num).toDouble(),
-    availableFuels: List<String>.from(json['availableFuels']),
-    isFuelixPartner: json['isFuelixPartner'] as bool,
-    is24Hours: json['is24Hours'] as bool,
-    operatingHours: json['operatingHours'] as String,
-    amenities: List<String>.from(json['amenities']),
-    distanceKm: 0.0,
-    isOpen: json['isOpen'] as bool,
-  );
+  factory FuelStation.fromJson(Map<String, dynamic> json) {
+    // Parse availableFuels (can be List or JSON string)
+    List<String> fuels = [];
+    if (json['availableFuels'] != null) {
+      if (json['availableFuels'] is List) {
+        fuels = List<String>.from(json['availableFuels']);
+      } else if (json['availableFuels'] is String) {
+        // If stored as JSON string
+        try {
+          List<dynamic> list = List<dynamic>.from(
+            jsonDecode(json['availableFuels']),
+          );
+          fuels = list.map((e) => e.toString()).toList();
+        } catch (e) {
+          fuels = [];
+        }
+      }
+    }
+
+    // Parse amenities
+    List<String> amenitiesList = [];
+    if (json['amenities'] != null) {
+      if (json['amenities'] is List) {
+        amenitiesList = List<String>.from(json['amenities']);
+      } else if (json['amenities'] is String) {
+        try {
+          List<dynamic> list = List<dynamic>.from(
+            jsonDecode(json['amenities']),
+          );
+          amenitiesList = list.map((e) => e.toString()).toList();
+        } catch (e) {
+          amenitiesList = [];
+        }
+      }
+    }
+
+    return FuelStation(
+      id: json['id'] as int,
+      name: json['name'] as String,
+      brand: json['brand'] as String,
+      address: json['address'] as String,
+      district: json['district'] as String,
+      province: json['province'] as String,
+      latitude: (json['latitude'] as num).toDouble(),
+      longitude: (json['longitude'] as num).toDouble(),
+      availableFuels: fuels,
+      isFuelixPartner: json['isFuelixPartner'] ?? false,
+      is24Hours: json['is24Hours'] ?? false,
+      operatingHours: json['operatingHours'] as String? ?? '',
+      amenities: amenitiesList,
+      distanceKm: 0.0,
+      isOpen: json['isOpen'] ?? true,
+    );
+  }
 
   FuelStation copyWith({double? distanceKm}) => FuelStation(
     id: id,
