@@ -6,7 +6,6 @@ import '../models/user_model.dart';
 import '../models/vehicle_model.dart';
 import '../models/topup_model.dart';
 import '../models/fuel_log_model.dart';
-import '../models/quota_model.dart';
 import '../services/api_service.dart';
 import '../services/tutorial_service.dart';
 import '../widgets/custom_button.dart';
@@ -15,7 +14,6 @@ import 'fuel_stations_screen.dart';
 import 'fuel_log_screen.dart';
 import 'notifications_screen.dart';
 
-// ─── Fuel grade catalogue ─────────────────────────────────────────────────────
 class FuelGrade {
   final String name;
   final double pricePerLitre;
@@ -45,9 +43,6 @@ class FuelCatalogue {
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// HomeScreen
-// ═════════════════════════════════════════════════════════════════════════════
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -70,15 +65,15 @@ class _HomeScreenState extends State<HomeScreen>
     'total_litres': 0,
     'total_spent': 0,
   };
-  final _apiService = ApiService();
+  int _unreadCount = 0;
+  final ApiService _apiService = ApiService();
 
-  // Tutorial keys
   final _keyWelcome = GlobalKey();
   final _keyVehicles = GlobalKey();
   final _keyWallet = GlobalKey();
   final _keyActions = GlobalKey();
-  final _keyFuelLogAction = GlobalKey(); // NEW
-  final _keyNotifications = GlobalKey(); // NEW
+  final _keyFuelLogAction = GlobalKey();
+  final _keyNotifications = GlobalKey();
   bool _showTour = false;
 
   @override
@@ -101,9 +96,9 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final u = ModalRoute.of(context)?.settings.arguments as UserModel?;
-    if (u != null && _user?.id != u.id) {
-      _user = u;
+    final args = ModalRoute.of(context)?.settings.arguments;
+    if (args != null && args is UserModel && _user?.id != args.id) {
+      _user = args;
       _loadAll();
       _checkHomeTour();
     }
@@ -116,7 +111,12 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _loadAll() async {
-    await Future.wait([_loadVehicles(), _loadWallet(), _loadFuelData()]);
+    await Future.wait([
+      _loadVehicles(),
+      _loadWallet(),
+      _loadFuelData(),
+      _loadUnreadCount(),
+    ]);
   }
 
   Future<void> _checkHomeTour() async {
@@ -180,7 +180,6 @@ class _HomeScreenState extends State<HomeScreen>
   Future<void> _loadFuelData() async {
     if (_user?.id == null) return;
 
-    // Load stats from backend
     final statsResult = await _apiService.getFuelLogStats(_user!.id!);
     if (statsResult['success']) {
       final stats = statsResult['data'];
@@ -195,7 +194,6 @@ class _HomeScreenState extends State<HomeScreen>
       }
     }
 
-    // Load recent logs
     final logsResult = await _apiService.getUserFuelLogs(_user!.id!);
     if (logsResult['success']) {
       List<dynamic> logsJson = logsResult['data'];
@@ -221,40 +219,67 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
+  Future<void> _loadUnreadCount() async {
+    if (_user?.id == null) return;
+    final result = await _apiService.getUnreadNotificationCount(_user!.id!);
+    if (result['success'] && mounted) {
+      setState(() => _unreadCount = result['count']);
+    }
+  }
+
   void _goToVehicles() async {
-    await Navigator.pushNamed(context, '/vehicles', arguments: _user);
-    _loadVehicles();
+    final result = await Navigator.pushNamed(
+      context,
+      '/vehicles',
+      arguments: _user,
+    );
+    if (result == true) {
+      _loadVehicles();
+    }
   }
 
   void _goToTopUp() async {
-    await Navigator.pushNamed(context, '/topup', arguments: _user);
-    _loadWallet();
+    final result = await Navigator.pushNamed(
+      context,
+      '/topup',
+      arguments: _user,
+    );
+    if (result == true) {
+      _loadWallet();
+    }
   }
 
   void _goToFuelStations() {
     Navigator.pushNamed(context, '/fuel_stations', arguments: _user);
   }
 
-  void _goToNotifications() {
-    Navigator.push(
+  void _goToNotifications() async {
+    final result = await Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+      MaterialPageRoute(
+        builder: (context) => const NotificationsScreen(),
+        settings: RouteSettings(arguments: _user),
+      ),
     );
+    if (result == true) {
+      _loadUnreadCount();
+    }
   }
 
   void _openFuelLogScreen() {
     if (_vehicles.isEmpty) {
-      showAppSnackbar(
-        context,
-        message: 'Add a vehicle first before logging fuel.',
-        isError: true,
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Add a vehicle first before logging fuel.'),
+          backgroundColor: AppColors.error,
+        ),
       );
       return;
     }
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => FuelLogScreen(
+        builder: (context) => FuelLogScreen(
           user: _user!,
           vehicles: _vehicles,
           walletBalance: _wallet?.balance ?? 0.0,
@@ -307,7 +332,6 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── Build ─────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -438,7 +462,6 @@ class _HomeScreenState extends State<HomeScreen>
                       ]),
                     ),
                   ),
-                  // Recent Fuel Logs
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(24, 28, 24, 14),
@@ -516,8 +539,7 @@ class _HomeScreenState extends State<HomeScreen>
           targetKey: _keyWelcome,
           title: 'Your Dashboard',
           body:
-              'This is your home screen. See your greeting, NIC, '
-              'and email at a glance.',
+              'This is your home screen. See your greeting, NIC, and email at a glance.',
           icon: Icons.dashboard_rounded,
           gradient: [AppColors.emerald, AppColors.ocean],
           position: TooltipPosition.below,
@@ -526,8 +548,7 @@ class _HomeScreenState extends State<HomeScreen>
           targetKey: _keyWallet,
           title: 'Fuelix Wallet',
           body:
-              'Your wallet balance is shown here. '
-              'Tap to top up and manage your fuel credits.',
+              'Your wallet balance is shown here. Tap to top up and manage your fuel credits.',
           icon: Icons.account_balance_wallet_rounded,
           gradient: [const Color(0xFF7C3AED), const Color(0xFF0A84FF)],
           position: TooltipPosition.below,
@@ -536,8 +557,7 @@ class _HomeScreenState extends State<HomeScreen>
           targetKey: _keyVehicles,
           title: 'My Vehicles',
           body:
-              'Add and manage your vehicles here. '
-              'Each vehicle gets a unique Fuel Pass QR code.',
+              'Add and manage your vehicles here. Each vehicle gets a unique Fuel Pass QR code.',
           icon: Icons.directions_car_rounded,
           gradient: [AppColors.ocean, AppColors.emerald],
           position: TooltipPosition.below,
@@ -546,8 +566,7 @@ class _HomeScreenState extends State<HomeScreen>
           targetKey: _keyActions,
           title: 'Quick Actions',
           body:
-              'Quick access to main features: Fuel Log, Analytics, '
-              'Fuel Stations, and Top Up.',
+              'Quick access to main features: Fuel Log, Analytics, Fuel Stations, and Top Up.',
           icon: Icons.grid_view_rounded,
           gradient: [AppColors.amber, AppColors.emerald],
           position: TooltipPosition.below,
@@ -556,8 +575,7 @@ class _HomeScreenState extends State<HomeScreen>
           targetKey: _keyFuelLogAction,
           title: 'Log Fuel',
           body:
-              'Tap here to record your fuel refills. '
-              'You\'ll need a vehicle added first.',
+              'Tap here to record your fuel refills. You\'ll need a vehicle added first.',
           icon: Icons.local_gas_station_rounded,
           gradient: [AppColors.emerald, AppColors.ocean],
           position: TooltipPosition.above,
@@ -566,8 +584,7 @@ class _HomeScreenState extends State<HomeScreen>
           targetKey: _keyNotifications,
           title: 'Notifications',
           body:
-              'Tap the bell icon to see your alerts, '
-              'fuel log confirmations, top-up receipts, and quota updates.',
+              'Tap the bell icon to see your alerts, fuel log confirmations, top-up receipts, and quota updates.',
           icon: Icons.notifications_rounded,
           gradient: [AppColors.ocean, AppColors.emerald],
           position: TooltipPosition.below,
@@ -581,7 +598,6 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── Top bar ───────────────────────────────────────────────────────────────
   Widget _buildTopBar(bool isDark, UserModel? user) {
     return Row(
       children: [
@@ -618,33 +634,64 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ),
         const Spacer(),
-        // Notifications button
         KeyedSubtree(
           key: _keyNotifications,
-          child: GestureDetector(
-            onTap: _goToNotifications,
-            child: Container(
-              width: 38,
-              height: 38,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(10),
-                color: isDark
-                    ? AppColors.darkSurfaceAlt
-                    : AppColors.lightSurfaceAlt,
-                border: Border.all(
-                  color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+          child: Stack(
+            children: [
+              GestureDetector(
+                onTap: _goToNotifications,
+                child: Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(10),
+                    color: isDark
+                        ? AppColors.darkSurfaceAlt
+                        : AppColors.lightSurfaceAlt,
+                    border: Border.all(
+                      color: isDark
+                          ? AppColors.darkBorder
+                          : AppColors.lightBorder,
+                    ),
+                  ),
+                  child: Icon(
+                    Icons.notifications_outlined,
+                    size: 18,
+                    color: isDark
+                        ? AppColors.darkTextSub
+                        : AppColors.lightTextSub,
+                  ),
                 ),
               ),
-              child: Icon(
-                Icons.notifications_outlined,
-                size: 18,
-                color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
-              ),
-            ),
+              if (_unreadCount > 0)
+                Positioned(
+                  right: 0,
+                  top: 0,
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: const BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: AppColors.error,
+                    ),
+                    constraints: const BoxConstraints(
+                      minWidth: 16,
+                      minHeight: 16,
+                    ),
+                    child: Text(
+                      '$_unreadCount',
+                      style: GoogleFonts.inter(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
         const SizedBox(width: 10),
-        // Profile button
         GestureDetector(
           onTap: () =>
               Navigator.pushNamed(context, '/profile', arguments: user),
@@ -675,7 +722,6 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── Welcome card ──────────────────────────────────────────────────────────
   Widget _buildWelcomeCard(bool isDark, UserModel? user) {
     return Container(
       padding: const EdgeInsets.all(24),
@@ -794,7 +840,6 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── Stats row ─────────────────────────────────────────────────────────────
   Widget _buildStatsRow(bool isDark) {
     final totalLogs = (_stats['total_logs'] ?? 0).toInt();
     final totalLitres = _stats['total_litres'] ?? 0.0;
@@ -835,7 +880,6 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── Wallet preview ────────────────────────────────────────────────────────
   Widget _buildWalletPreview(bool isDark) {
     return GestureDetector(
       onTap: _goToTopUp,
@@ -923,7 +967,6 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── Vehicles section ──────────────────────────────────────────────────────
   Widget _buildVehiclesSection(bool isDark) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -993,7 +1036,6 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── Recent Fuel Logs list ─────────────────────────────────────────────────
   Widget _buildRecentLogs(bool isDark) {
     return Column(
       children: _recentLogs.map((log) {
@@ -1018,9 +1060,19 @@ class _HomeScreenState extends State<HomeScreen>
             final result = await _apiService.deleteFuelLog(log.id!);
             if (result['success']) {
               _loadFuelData();
-              showAppSnackbar(context, message: 'Log deleted', isSuccess: true);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Log deleted'),
+                  backgroundColor: AppColors.emerald,
+                ),
+              );
             } else {
-              showAppSnackbar(context, message: result['error'], isError: true);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(result['error']),
+                  backgroundColor: AppColors.error,
+                ),
+              );
             }
           },
         );
@@ -1028,7 +1080,6 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── Empty activity ────────────────────────────────────────────────────────
   Widget _buildEmptyActivity(bool isDark) {
     return GestureDetector(
       onTap: _openFuelLogScreen,
@@ -1108,9 +1159,6 @@ class _HomeScreenState extends State<HomeScreen>
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// Fuel Log Tile
-// ═════════════════════════════════════════════════════════════════════════════
 class _FuelLogTile extends StatelessWidget {
   final FuelLogModel log;
   final VehicleModel vehicle;
@@ -1309,9 +1357,6 @@ class _FuelLogTile extends StatelessWidget {
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// Stat Card
-// ═════════════════════════════════════════════════════════════════════════════
 class _StatCard extends StatelessWidget {
   final String label, value;
   final IconData icon;
@@ -1366,9 +1411,6 @@ class _StatCard extends StatelessWidget {
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// Action Card
-// ═════════════════════════════════════════════════════════════════════════════
 class _ActionCard extends StatefulWidget {
   final IconData icon;
   final String label, sublabel;
@@ -1493,7 +1535,6 @@ class _ActionCardState extends State<_ActionCard> {
   }
 }
 
-// ─── Vehicle chip ─────────────────────────────────────────────────────────────
 class _VehicleChip extends StatelessWidget {
   final VehicleModel vehicle;
   final bool isDark;
@@ -1625,7 +1666,6 @@ class _VehicleChip extends StatelessWidget {
   }
 }
 
-// ─── Add vehicle card ─────────────────────────────────────────────────────────
 class _VehicleAddCard extends StatelessWidget {
   final bool isDark;
   final VoidCallback onTap;
@@ -1677,7 +1717,6 @@ class _VehicleAddCard extends StatelessWidget {
   }
 }
 
-// ─── Empty vehicle card ───────────────────────────────────────────────────────
 class _VehicleEmptyCard extends StatelessWidget {
   final bool isDark;
   final VoidCallback onAdd;

@@ -5,15 +5,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 class ApiService {
   // Your laptop IP address - for local network connection
   static const String baseUrl = 'http://192.168.43.214:8080/api';
-  static const String wsUrl = 'http://192.168.43.214:8080/ws';
 
   // For Android emulator (use this only for emulator testing)
   // static const String baseUrl = 'http://10.0.2.2:8080/api';
-  // static const String wsUrl = 'http://10.0.2.2:8080/ws';
 
   // For iOS simulator
   // static const String baseUrl = 'http://localhost:8080/api';
-  // static const String wsUrl = 'http://localhost:8080/ws';
 
   static Future<String?> getToken() async {
     final prefs = await SharedPreferences.getInstance();
@@ -1108,6 +1105,183 @@ class ApiService {
         };
       }
     } catch (e) {
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
+  // Add these methods to existing ApiService class
+
+  // ==================== NOTIFICATION APIs ====================
+
+  Future<Map<String, dynamic>> getUserNotifications(int userId) async {
+    try {
+      final token = await getToken();
+      if (token == null) {
+        return {'success': false, 'error': 'Not authenticated'};
+      }
+
+      final response = await http
+          .get(
+            Uri.parse('$baseUrl/notifications/user/$userId'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 200 && data['success'] == true) {
+        return {'success': true, 'data': data['data']};
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to fetch notifications',
+        };
+      }
+    } catch (e) {
+      print('Error getting notifications: $e');
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
+  Future<Map<String, dynamic>> getUnreadNotificationCount(int userId) async {
+    try {
+      final token = await getToken();
+      if (token == null) {
+        return {'success': false, 'error': 'Not authenticated'};
+      }
+
+      final response = await http
+          .get(
+            Uri.parse('$baseUrl/notifications/user/$userId/unread-count'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 200 && data['success'] == true) {
+        return {'success': true, 'count': data['count']};
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to fetch count',
+        };
+      }
+    } catch (e) {
+      print('Error getting unread count: $e');
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
+  Future<Map<String, dynamic>> markNotificationAsRead(
+    int notificationId,
+    int userId,
+  ) async {
+    try {
+      final token = await getToken();
+      if (token == null) {
+        return {'success': false, 'error': 'Not authenticated'};
+      }
+
+      print('🔵 Marking notification $notificationId as read for user $userId');
+
+      final response = await http
+          .put(
+            Uri.parse(
+              '$baseUrl/notifications/$notificationId/read?userId=$userId',
+            ),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+      print('🔵 Mark as read response: ${response.statusCode} - $data');
+
+      if (response.statusCode == 200 && data['success'] == true) {
+        return {'success': true};
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to mark as read',
+        };
+      }
+    } catch (e) {
+      print('❌ Error marking as read: $e');
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
+  Future<Map<String, dynamic>> markAllNotificationsAsRead(int userId) async {
+    try {
+      final token = await getToken();
+      if (token == null) {
+        return {'success': false, 'error': 'Not authenticated'};
+      }
+
+      final response = await http
+          .put(
+            Uri.parse('$baseUrl/notifications/user/$userId/read-all'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 200 && data['success'] == true) {
+        return {'success': true};
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to mark all as read',
+        };
+      }
+    } catch (e) {
+      print('Error marking all as read: $e');
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
+  Future<Map<String, dynamic>> clearAllNotifications(int userId) async {
+    try {
+      final token = await getToken();
+      if (token == null) {
+        return {'success': false, 'error': 'Not authenticated'};
+      }
+
+      final response = await http
+          .delete(
+            Uri.parse('$baseUrl/notifications/user/$userId'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 200 && data['success'] == true) {
+        return {'success': true};
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to clear notifications',
+        };
+      }
+    } catch (e) {
+      print('Error clearing notifications: $e');
       return {'success': false, 'error': 'Network error: $e'};
     }
   }
