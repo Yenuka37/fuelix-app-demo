@@ -17,7 +17,7 @@ class DbHelper {
   static Database? _database;
 
   static const String _dbName = 'fuelix.db';
-  static const int _dbVersion = 8;
+  static const int _dbVersion = 9;
   static const String _usersTable = 'users';
   static const String _vehiclesTable = 'vehicles';
   static const String _quotasTable = 'fuel_quotas';
@@ -60,6 +60,7 @@ class DbHelper {
         postal_code   TEXT NOT NULL DEFAULT '',
         email         TEXT NOT NULL UNIQUE,
         password      TEXT NOT NULL,
+        role          TEXT NOT NULL DEFAULT 'CLIENT',
         created_at    TEXT NOT NULL
       )
     ''');
@@ -195,6 +196,13 @@ class DbHelper {
       await _createTopupTable(db);
     }
     if (oldVersion < 8) await _createFuelLogsTable(db);
+    if (oldVersion < 9) {
+      try {
+        await db.execute(
+          "ALTER TABLE $_usersTable ADD COLUMN role TEXT NOT NULL DEFAULT 'CLIENT'",
+        );
+      } catch (_) {}
+    }
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -367,7 +375,7 @@ class DbHelper {
         whereArgs: [vehicleId],
       );
       if (rows == 1) {
-        final q = QuotaService.newWeekQuota(vehicleId, vehicleType);
+        final q = await QuotaService.newWeekQuota(vehicleId, vehicleType);
         await txn.insert(_quotasTable, q.toMap()..remove('id'));
       }
     });
@@ -392,9 +400,25 @@ class DbHelper {
     );
     if (rows.isNotEmpty) {
       final existing = FuelQuotaModel.fromMap(rows.first);
-      if (QuotaService.isCurrentWeek(existing, now)) return existing;
+      if (QuotaService.isCurrentWeek(existing, now)) {
+        // Check if quota needs update (admin might have changed limits)
+        final currentLimit = await QuotaService.getQuotaForVehicleType(
+          vehicleType,
+        );
+        if (existing.quotaLitres != currentLimit) {
+          final updated = existing.copyWith(quotaLitres: currentLimit);
+          await db.update(
+            _quotasTable,
+            updated.toMap(),
+            where: 'id = ?',
+            whereArgs: [updated.id],
+          );
+          return updated;
+        }
+        return existing;
+      }
     }
-    final fresh = QuotaService.newWeekQuota(vehicleId, vehicleType);
+    final fresh = await QuotaService.newWeekQuota(vehicleId, vehicleType);
     final id = await db.insert(_quotasTable, fresh.toMap()..remove('id'));
     return fresh.copyWith(id: id);
   }
@@ -506,27 +530,15 @@ class DbHelper {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // FUEL LOGS — atomic save (quota deduction + wallet deduction)
+  // FUEL LOGS — atomic save (quota deduction + wallet deduction) with dynamic quota
   // ══════════════════════════════════════════════════════════════════════════
 
-  /// Saves a fuel log inside a single transaction:
-  ///   1. Ensures a current-week quota record exists.
-  ///   2. Checks litre headroom  → returns -1 if exceeded.
-  ///   3. Checks wallet balance  → returns -2 if insufficient.
-  ///   4. Deducts litres from quota.
-  ///   5. Deducts total_cost from wallet.
-  ///   6. Inserts the fuel log row.
-  ///
-  /// Returns inserted row id (>0) on success, or:
-  ///   -1  quota limit exceeded
-  ///   -2  wallet balance insufficient
-  ///   -3  other db error
   Future<int> saveFuelLog(FuelLogModel log, String vehicleType) async {
     final db = await database;
     int resultId = -3;
 
     await db.transaction((txn) async {
-      // ── 1. Get or create current-week quota ───────────────────────────────
+      // ── 1. Get or create current-week quota with dynamic limit ───────────
       final quotaRows = await txn.query(
         _quotasTable,
         where: 'vehicle_id = ?',
@@ -536,12 +548,33 @@ class DbHelper {
       );
 
       FuelQuotaModel quota;
+      final currentLimit = await QuotaService.getQuotaForVehicleType(
+        vehicleType,
+      );
+
       if (quotaRows.isNotEmpty) {
         final existing = FuelQuotaModel.fromMap(quotaRows.first);
         if (QuotaService.isCurrentWeek(existing, DateTime.now())) {
-          quota = existing;
+          // Update quota if limit has changed
+          if (existing.quotaLitres != currentLimit) {
+            quota = existing.copyWith(quotaLitres: currentLimit);
+            await txn.update(
+              _quotasTable,
+              quota.toMap(),
+              where: 'id = ?',
+              whereArgs: [quota.id],
+            );
+          } else {
+            quota = existing;
+          }
         } else {
-          final fresh = QuotaService.newWeekQuota(log.vehicleId, vehicleType);
+          final fresh = FuelQuotaModel(
+            vehicleId: log.vehicleId,
+            weekStart: QuotaService.weekStart(DateTime.now()),
+            weekEnd: QuotaService.weekEnd(DateTime.now()),
+            quotaLitres: currentLimit,
+            usedLitres: 0.0,
+          );
           final newId = await txn.insert(
             _quotasTable,
             fresh.toMap()..remove('id'),
@@ -549,7 +582,13 @@ class DbHelper {
           quota = fresh.copyWith(id: newId);
         }
       } else {
-        final fresh = QuotaService.newWeekQuota(log.vehicleId, vehicleType);
+        final fresh = FuelQuotaModel(
+          vehicleId: log.vehicleId,
+          weekStart: QuotaService.weekStart(DateTime.now()),
+          weekEnd: QuotaService.weekEnd(DateTime.now()),
+          quotaLitres: currentLimit,
+          usedLitres: 0.0,
+        );
         final newId = await txn.insert(
           _quotasTable,
           fresh.toMap()..remove('id'),
@@ -612,7 +651,6 @@ class DbHelper {
     return resultId;
   }
 
-  /// All fuel logs for a user, newest first.
   Future<List<FuelLogModel>> getFuelLogsByUser(int userId, {int? limit}) async {
     final db = await database;
     final r = await db.query(
@@ -625,7 +663,6 @@ class DbHelper {
     return r.map(FuelLogModel.fromMap).toList();
   }
 
-  /// Fuel logs for a specific vehicle, newest first.
   Future<List<FuelLogModel>> getFuelLogsByVehicle(
     int vehicleId, {
     int? limit,
@@ -641,13 +678,11 @@ class DbHelper {
     return r.map(FuelLogModel.fromMap).toList();
   }
 
-  /// Delete a single fuel log entry.
   Future<int> deleteFuelLog(int id) async {
     final db = await database;
     return db.delete(_fuelLogsTable, where: 'id = ?', whereArgs: [id]);
   }
 
-  /// Aggregate stats for a user: total logs, total litres, total spent.
   Future<Map<String, double>> getFuelLogStats(int userId) async {
     final db = await database;
     final r = await db.rawQuery(

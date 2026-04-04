@@ -2,7 +2,6 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 import '../theme/app_theme.dart';
 import '../models/user_model.dart';
 import '../models/vehicle_model.dart';
@@ -13,6 +12,7 @@ import '../services/api_service.dart';
 import '../database/db_helper.dart';
 import '../widgets/custom_button.dart';
 import '../widgets/tutorial_overlay.dart';
+import 'fuel_pass_sheet.dart';
 
 // ─── Static data ──────────────────────────────────────────────────────────────
 const _kVehicleTypes = [
@@ -154,7 +154,6 @@ class _VehiclesScreenState extends State<VehiclesScreen>
 
     setState(() => _loading = true);
 
-    // Fetch from backend
     final result = await _apiService.getVehicles(_user!.id!);
 
     if (result['success']) {
@@ -183,7 +182,6 @@ class _VehiclesScreenState extends State<VehiclesScreen>
           )
           .toList();
 
-      // Sync to local DB (optional - for offline fallback)
       for (var v in vehicles) {
         await _db.insertVehicle(v);
       }
@@ -195,7 +193,6 @@ class _VehiclesScreenState extends State<VehiclesScreen>
         });
       }
     } else {
-      // Fallback to local DB
       final list = await _db.getVehiclesByUser(_user!.id!);
       if (mounted) {
         setState(() {
@@ -210,7 +207,6 @@ class _VehiclesScreenState extends State<VehiclesScreen>
 
   // ── Add / Edit form ───────────────────────────────────────────────────────
   Future<void> _openForm({VehicleModel? vehicle}) async {
-    // Locked vehicles cannot be edited
     if (vehicle?.isLocked == true) {
       _showFuelPass(vehicle!);
       return;
@@ -235,7 +231,7 @@ class _VehiclesScreenState extends State<VehiclesScreen>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _FuelPassSheet(vehicle: v, db: _db),
+      builder: (_) => FuelPassSheet(vehicle: v, db: _db),
     );
   }
 
@@ -291,7 +287,7 @@ class _VehiclesScreenState extends State<VehiclesScreen>
               ),
               child: Row(
                 children: [
-                  Icon(
+                  const Icon(
                     Icons.warning_amber_rounded,
                     size: 18,
                     color: AppColors.amber,
@@ -315,11 +311,14 @@ class _VehiclesScreenState extends State<VehiclesScreen>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Cancel'),
+            child: const Text('Cancel'),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text('Generate', style: TextStyle(color: AppColors.emerald)),
+            child: const Text(
+              'Generate',
+              style: TextStyle(color: AppColors.emerald),
+            ),
           ),
         ],
       ),
@@ -340,7 +339,12 @@ class _VehiclesScreenState extends State<VehiclesScreen>
       final updated = _vehicles.firstWhere((x) => x.id == v.id);
       _showFuelPass(updated);
     } else {
-      showAppSnackbar(context, message: result['error'], isError: true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result['error']),
+          backgroundColor: AppColors.error,
+        ),
+      );
     }
   }
 
@@ -364,11 +368,14 @@ class _VehiclesScreenState extends State<VehiclesScreen>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Cancel'),
+            child: const Text('Cancel'),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text('Remove', style: TextStyle(color: AppColors.error)),
+            child: const Text(
+              'Remove',
+              style: TextStyle(color: AppColors.error),
+            ),
           ),
         ],
       ),
@@ -380,7 +387,12 @@ class _VehiclesScreenState extends State<VehiclesScreen>
         await _db.deleteVehicle(v.id!);
         await _loadVehicles();
       } else {
-        showAppSnackbar(context, message: result['error'], isError: true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result['error']),
+            backgroundColor: AppColors.error,
+          ),
+        );
         setState(() => _loading = false);
       }
     }
@@ -497,8 +509,7 @@ class _VehiclesScreenState extends State<VehiclesScreen>
                             onDelete: () => _confirmDelete(_vehicles[i]),
                             onGenerateQr: () =>
                                 _confirmGenerateQr(_vehicles[i]),
-                            onViewFuelPass: () async =>
-                                _showFuelPass(_vehicles[i]),
+                            onViewFuelPass: () => _showFuelPass(_vehicles[i]),
                             cardKey: i == 0 ? _keyVehicleCard : null,
                             fuelPassKey: i == 0 ? _keyFuelPass : null,
                           ),
@@ -527,7 +538,7 @@ class _VehiclesScreenState extends State<VehiclesScreen>
         targetKey: _keyVehicleCard,
         title: _vehicles.isEmpty ? 'Your Garage' : 'Vehicle Card',
         body: _vehicles.isEmpty
-            ? 'Your registered vehicles will appear here. Each card shows the type, registration and fuel type.'
+            ? 'Your registered vehicles will appear here.'
             : 'Each vehicle card shows its type, registration number, fuel type and Fuel Pass status.',
         icon: Icons.directions_car_rounded,
         gradient: [AppColors.ocean, AppColors.emerald],
@@ -923,629 +934,38 @@ class _VehicleCard extends StatelessWidget {
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// Fuel Pass Bottom-Sheet
-// ═════════════════════════════════════════════════════════════════════════════
-class _FuelPassSheet extends StatefulWidget {
-  final VehicleModel vehicle;
-  final DbHelper db;
-  const _FuelPassSheet({required this.vehicle, required this.db});
-  @override
-  State<_FuelPassSheet> createState() => _FuelPassSheetState();
-}
-
-class _FuelPassSheetState extends State<_FuelPassSheet> {
-  FuelQuotaModel? _quota;
-  bool _loading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadQuota();
-  }
-
-  Future<void> _loadQuota() async {
-    if (widget.vehicle.id == null) {
-      setState(() => _loading = false);
-      return;
-    }
-    final q = await widget.db.getCurrentWeekQuota(
-      widget.vehicle.id!,
-      widget.vehicle.type,
-    );
-    if (mounted)
-      setState(() {
-        _quota = q;
-        _loading = false;
-      });
-  }
-
-  String _formatDate(DateTime d) {
-    const m = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-    return '${m[d.month - 1]} ${d.day}, ${d.year}';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final accent = vehicleTypeColor(widget.vehicle.type);
-    final code = widget.vehicle.fuelPassCode ?? '';
-    final qrData =
-        'FUELIX|${widget.vehicle.fuelPassCode}|${widget.vehicle.registrationNo}|'
-        '${widget.vehicle.make} ${widget.vehicle.model}|${widget.vehicle.year}|${widget.vehicle.fuelType}';
-
-    return Container(
-      decoration: BoxDecoration(
-        color: isDark ? AppColors.darkBackground : AppColors.lightBackground,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-      ),
-      child: SingleChildScrollView(
-        physics: const BouncingScrollPhysics(),
-        child: Column(
-          children: [
-            const SizedBox(height: 12),
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(2),
-                color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-              ),
-            ),
-            const SizedBox(height: 20),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Container(
-                width: double.infinity,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(24),
-                  gradient: LinearGradient(
-                    colors: [
-                      accent,
-                      accent.withOpacity(0.75),
-                      AppColors.ocean.withOpacity(0.85),
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: accent.withOpacity(0.35),
-                      blurRadius: 30,
-                      offset: const Offset(0, 12),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(22, 22, 22, 16),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 42,
-                            height: 42,
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(12),
-                              color: Colors.white.withOpacity(0.2),
-                            ),
-                            child: Icon(
-                              vehicleTypeIcon(widget.vehicle.type),
-                              size: 22,
-                              color: Colors.white,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'FUEL PASS',
-                                  style: GoogleFonts.spaceGrotesk(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w700,
-                                    color: Colors.white.withOpacity(0.75),
-                                    letterSpacing: 2,
-                                  ),
-                                ),
-                                Text(
-                                  widget.vehicle.displayName,
-                                  style: GoogleFonts.spaceGrotesk(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w700,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 5,
-                            ),
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(8),
-                              color: Colors.white.withOpacity(0.15),
-                            ),
-                            child: Text(
-                              'FUELIX',
-                              style: GoogleFonts.spaceGrotesk(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w800,
-                                color: Colors.white,
-                                letterSpacing: 2,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 22),
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(18),
-                        color: Colors.white,
-                      ),
-                      child: Column(
-                        children: [
-                          QrImageView(
-                            data: qrData,
-                            version: QrVersions.auto,
-                            size: 175,
-                            eyeStyle: const QrEyeStyle(
-                              eyeShape: QrEyeShape.square,
-                              color: Color(0xFF111827),
-                            ),
-                            dataModuleStyle: const QrDataModuleStyle(
-                              dataModuleShape: QrDataModuleShape.square,
-                              color: Color(0xFF111827),
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 8,
-                            ),
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(10),
-                              color: const Color(0xFFF3F4F6),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  '${code.substring(0, 4)} ${code.substring(4)}',
-                                  style: GoogleFonts.spaceGrotesk(
-                                    fontSize: 22,
-                                    fontWeight: FontWeight.w800,
-                                    color: const Color(0xFF111827),
-                                    letterSpacing: 4,
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                GestureDetector(
-                                  onTap: () {
-                                    Clipboard.setData(
-                                      ClipboardData(text: code),
-                                    );
-                                    showAppSnackbar(
-                                      context,
-                                      message: 'Code copied!',
-                                      isSuccess: true,
-                                    );
-                                  },
-                                  child: const Icon(
-                                    Icons.copy_rounded,
-                                    size: 18,
-                                    color: Color(0xFF6B7280),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(22, 16, 22, 22),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: _PassDetail(
-                              label: 'REG NO',
-                              value: widget.vehicle.registrationNo,
-                            ),
-                          ),
-                          Expanded(
-                            child: _PassDetail(
-                              label: 'FUEL TYPE',
-                              value: widget.vehicle.fuelType,
-                            ),
-                          ),
-                          Expanded(
-                            child: _PassDetail(
-                              label: 'ISSUED',
-                              value: widget.vehicle.qrGeneratedAt != null
-                                  ? _formatDate(widget.vehicle.qrGeneratedAt!)
-                                  : '—',
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: _loading
-                  ? const Center(
-                      child: Padding(
-                        padding: EdgeInsets.all(20),
-                        child: CircularProgressIndicator(
-                          color: AppColors.emerald,
-                          strokeWidth: 2,
-                        ),
-                      ),
-                    )
-                  : _quota != null
-                  ? _QuotaCard(
-                      quota: _quota!,
-                      vehicleType: widget.vehicle.type,
-                      isDark: isDark,
-                    )
-                  : const SizedBox.shrink(),
-            ),
-            const SizedBox(height: 16),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: _Notice(
-                icon: Icons.info_outline_rounded,
-                color: AppColors.ocean,
-                isDark: isDark,
-                text:
-                    'Show this QR code at fuel stations to authorise refuelling. This pass is unique to this vehicle and cannot be transferred.',
-              ),
-            ),
-            const SizedBox(height: 12),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 0, 24, 36),
-              child: _Notice(
-                icon: Icons.lock_rounded,
-                color: AppColors.amber,
-                isDark: isDark,
-                text:
-                    'Vehicle details are locked. The Fuel Pass code cannot be regenerated.',
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _QuotaCard extends StatelessWidget {
-  final FuelQuotaModel quota;
-  final String vehicleType;
-  final bool isDark;
-
-  const _QuotaCard({
-    required this.quota,
-    required this.vehicleType,
-    required this.isDark,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final remaining = quota.remainingLitres;
-    final used = quota.usedLitres;
-    final total = quota.quotaLitres;
-    final pct = quota.usedPercent;
-    final exhausted = quota.isExhausted;
-
-    Color gaugeColor;
-    if (pct < 0.5)
-      gaugeColor = AppColors.emerald;
-    else if (pct < 0.85)
-      gaugeColor = AppColors.amber;
-    else
-      gaugeColor = AppColors.error;
-
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-        border: Border.all(
-          color: exhausted
-              ? AppColors.error.withOpacity(0.4)
-              : (isDark ? AppColors.darkBorder : AppColors.lightBorder),
-          width: exhausted ? 1.5 : 1,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(10),
-                  gradient: LinearGradient(
-                    colors: exhausted
-                        ? [AppColors.error, AppColors.error.withOpacity(0.7)]
-                        : [AppColors.emerald, AppColors.ocean],
-                  ),
-                ),
-                child: Icon(
-                  exhausted
-                      ? Icons.no_meals_rounded
-                      : Icons.local_gas_station_rounded,
-                  size: 17,
-                  color: Colors.white,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Weekly Fuel Quota',
-                      style: GoogleFonts.spaceGrotesk(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: isDark
-                            ? AppColors.darkText
-                            : AppColors.lightText,
-                      ),
-                    ),
-                    Text(
-                      QuotaService.weekLabel(quota.weekStart),
-                      style: GoogleFonts.inter(
-                        fontSize: 11,
-                        color: isDark
-                            ? AppColors.darkTextMuted
-                            : AppColors.lightTextMuted,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 5,
-                ),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(20),
-                  color: (exhausted ? AppColors.error : AppColors.emerald)
-                      .withOpacity(isDark ? 0.15 : 0.10),
-                  border: Border.all(
-                    color: (exhausted ? AppColors.error : AppColors.emerald)
-                        .withOpacity(0.35),
-                  ),
-                ),
-                child: Text(
-                  exhausted
-                      ? 'Exhausted'
-                      : QuotaService.daysRemainingLabel(now),
-                  style: GoogleFonts.spaceGrotesk(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: exhausted ? AppColors.error : AppColors.emerald,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
-          Row(
-            children: [
-              _QuotaStat(
-                label: 'Remaining',
-                value: '${remaining.toStringAsFixed(1)} L',
-                color: exhausted ? AppColors.error : AppColors.emerald,
-                isDark: isDark,
-                large: true,
-              ),
-              _vDivider(isDark),
-              _QuotaStat(
-                label: 'Used',
-                value: '${used.toStringAsFixed(1)} L',
-                color: AppColors.amber,
-                isDark: isDark,
-              ),
-              _vDivider(isDark),
-              _QuotaStat(
-                label: 'Weekly Total',
-                value: '${total.toStringAsFixed(0)} L',
-                color: AppColors.ocean,
-                isDark: isDark,
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(6),
-                      child: LinearProgressIndicator(
-                        value: pct,
-                        minHeight: 10,
-                        backgroundColor: isDark
-                            ? AppColors.darkSurfaceAlt
-                            : AppColors.lightSurfaceAlt,
-                        valueColor: AlwaysStoppedAnimation<Color>(gaugeColor),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          '${(pct * 100).toStringAsFixed(0)}% used',
-                          style: GoogleFonts.inter(
-                            fontSize: 11,
-                            color: isDark
-                                ? AppColors.darkTextMuted
-                                : AppColors.lightTextMuted,
-                          ),
-                        ),
-                        Text(
-                          'Resets next Monday',
-                          style: GoogleFonts.inter(
-                            fontSize: 11,
-                            color: isDark
-                                ? AppColors.darkTextMuted
-                                : AppColors.lightTextMuted,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          if (exhausted) ...[
-            const SizedBox(height: 14),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(10),
-                color: AppColors.error.withOpacity(isDark ? 0.12 : 0.07),
-                border: Border.all(color: AppColors.error.withOpacity(0.3)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(
-                    Icons.warning_amber_rounded,
-                    size: 15,
-                    color: AppColors.error,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Your weekly quota is exhausted. Balance resets every Monday.',
-                      style: GoogleFonts.inter(
-                        fontSize: 12,
-                        color: AppColors.error,
-                        height: 1.4,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _vDivider(bool isDark) => Container(
-    width: 1,
-    height: 36,
-    margin: const EdgeInsets.symmetric(horizontal: 12),
-    color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-  );
-}
-
-class _QuotaStat extends StatelessWidget {
-  final String label, value;
+class _Tag extends StatelessWidget {
+  final String label;
   final Color color;
-  final bool isDark, large;
-  const _QuotaStat({
+  final bool isDark;
+  final IconData? icon;
+  const _Tag({
     required this.label,
-    required this.value,
     required this.color,
     required this.isDark,
-    this.large = false,
-  });
-
-  @override
-  Widget build(BuildContext context) => Expanded(
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        Text(
-          value,
-          style: GoogleFonts.spaceGrotesk(
-            fontSize: large ? 22 : 17,
-            fontWeight: FontWeight.w800,
-            color: color,
-          ),
-        ),
-        const SizedBox(height: 3),
-        Text(
-          label,
-          style: GoogleFonts.inter(
-            fontSize: 11,
-            color: isDark ? AppColors.darkTextMuted : AppColors.lightTextMuted,
-          ),
-        ),
-      ],
-    ),
-  );
-}
-
-class _Notice extends StatelessWidget {
-  final IconData icon;
-  final Color color;
-  final bool isDark;
-  final String text;
-  const _Notice({
-    required this.icon,
-    required this.color,
-    required this.isDark,
-    required this.text,
+    this.icon,
   });
 
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(14),
+    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
     decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(12),
-      color: color.withOpacity(isDark ? 0.08 : 0.05),
-      border: Border.all(color: color.withOpacity(0.2)),
+      borderRadius: BorderRadius.circular(6),
+      color: color.withOpacity(isDark ? 0.15 : 0.10),
     ),
     child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 16, color: color),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text(
-            text,
-            style: GoogleFonts.inter(fontSize: 12, color: color, height: 1.5),
+        if (icon != null) ...[
+          Icon(icon, size: 9, color: color),
+          const SizedBox(width: 3),
+        ],
+        Text(
+          label,
+          style: GoogleFonts.spaceGrotesk(
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            color: color,
           ),
         ),
       ],
@@ -1553,33 +973,101 @@ class _Notice extends StatelessWidget {
   );
 }
 
-class _PassDetail extends StatelessWidget {
-  final String label, value;
-  const _PassDetail({required this.label, required this.value});
+class _Chip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool isDark;
+  const _Chip({required this.icon, required this.label, required this.isDark});
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
     children: [
+      Icon(
+        icon,
+        size: 13,
+        color: isDark ? AppColors.darkTextMuted : AppColors.lightTextMuted,
+      ),
+      const SizedBox(width: 4),
       Text(
         label,
         style: GoogleFonts.inter(
-          fontSize: 9,
-          fontWeight: FontWeight.w600,
-          color: Colors.white.withOpacity(0.65),
-          letterSpacing: 1,
-        ),
-      ),
-      const SizedBox(height: 3),
-      Text(
-        value,
-        style: GoogleFonts.spaceGrotesk(
           fontSize: 12,
-          fontWeight: FontWeight.w700,
-          color: Colors.white,
+          color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
         ),
       ),
     ],
+  );
+}
+
+class _EmptyGarage extends StatelessWidget {
+  final bool isDark;
+  final VoidCallback onAdd;
+  final Key? tutorialKey;
+  const _EmptyGarage({
+    required this.isDark,
+    required this.onAdd,
+    this.tutorialKey,
+  });
+
+  @override
+  Widget build(BuildContext context) => Center(
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 40),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 90,
+            height: 90,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                colors: [
+                  AppColors.emerald.withOpacity(0.15),
+                  AppColors.ocean.withOpacity(0.15),
+                ],
+              ),
+            ),
+            child: Icon(
+              Icons.directions_car_outlined,
+              size: 40,
+              color: isDark
+                  ? AppColors.darkTextMuted
+                  : AppColors.lightTextMuted,
+            ),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            'No vehicles added',
+            style: GoogleFonts.spaceGrotesk(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: isDark ? AppColors.darkText : AppColors.lightText,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Add your vehicles to track fuel consumption and trips.',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              height: 1.5,
+              color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
+            ),
+          ),
+          const SizedBox(height: 28),
+          KeyedSubtree(
+            key: tutorialKey,
+            child: GradientButton(
+              label: 'Add First Vehicle',
+              onPressed: onAdd,
+              colors: [AppColors.emerald, AppColors.ocean],
+            ),
+          ),
+        ],
+      ),
+    ),
   );
 }
 
@@ -1647,10 +1135,11 @@ class _VehicleFormSheetState extends State<_VehicleFormSheet> {
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     if (_fuelType == null) {
-      showAppSnackbar(
-        context,
-        message: 'Please select a fuel type.',
-        isError: true,
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please select a fuel type.'),
+          backgroundColor: AppColors.error,
+        ),
       );
       return;
     }
@@ -1683,14 +1172,20 @@ class _VehicleFormSheetState extends State<_VehicleFormSheet> {
     setState(() => _isLoading = false);
 
     if (result['success']) {
-      showAppSnackbar(
-        context,
-        message: _isEdit ? 'Vehicle updated!' : 'Vehicle added!',
-        isSuccess: true,
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_isEdit ? 'Vehicle updated!' : 'Vehicle added!'),
+          backgroundColor: AppColors.emerald,
+        ),
       );
       Navigator.pop(context, true);
     } else {
-      showAppSnackbar(context, message: result['error'], isError: true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result['error']),
+          backgroundColor: AppColors.error,
+        ),
+      );
     }
   }
 
@@ -1924,144 +1419,6 @@ class _VehicleFormSheetState extends State<_VehicleFormSheet> {
       ),
     );
   }
-}
-
-// ─── Small helpers ────────────────────────────────────────────────────────────
-class _Tag extends StatelessWidget {
-  final String label;
-  final Color color;
-  final bool isDark;
-  final IconData? icon;
-  const _Tag({
-    required this.label,
-    required this.color,
-    required this.isDark,
-    this.icon,
-  });
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-    decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(6),
-      color: color.withOpacity(isDark ? 0.15 : 0.10),
-    ),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (icon != null) ...[
-          Icon(icon, size: 9, color: color),
-          const SizedBox(width: 3),
-        ],
-        Text(
-          label,
-          style: GoogleFonts.spaceGrotesk(
-            fontSize: 10,
-            fontWeight: FontWeight.w700,
-            color: color,
-          ),
-        ),
-      ],
-    ),
-  );
-}
-
-class _Chip extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final bool isDark;
-  const _Chip({required this.icon, required this.label, required this.isDark});
-
-  @override
-  Widget build(BuildContext context) => Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Icon(
-        icon,
-        size: 13,
-        color: isDark ? AppColors.darkTextMuted : AppColors.lightTextMuted,
-      ),
-      const SizedBox(width: 4),
-      Text(
-        label,
-        style: GoogleFonts.inter(
-          fontSize: 12,
-          color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
-        ),
-      ),
-    ],
-  );
-}
-
-class _EmptyGarage extends StatelessWidget {
-  final bool isDark;
-  final VoidCallback onAdd;
-  final Key? tutorialKey;
-  const _EmptyGarage({
-    required this.isDark,
-    required this.onAdd,
-    this.tutorialKey,
-  });
-
-  @override
-  Widget build(BuildContext context) => Center(
-    child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 40),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 90,
-            height: 90,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: LinearGradient(
-                colors: [
-                  AppColors.emerald.withOpacity(0.15),
-                  AppColors.ocean.withOpacity(0.15),
-                ],
-              ),
-            ),
-            child: Icon(
-              Icons.directions_car_outlined,
-              size: 40,
-              color: isDark
-                  ? AppColors.darkTextMuted
-                  : AppColors.lightTextMuted,
-            ),
-          ),
-          const SizedBox(height: 20),
-          Text(
-            'No vehicles added',
-            style: GoogleFonts.spaceGrotesk(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              color: isDark ? AppColors.darkText : AppColors.lightText,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Add your vehicles to track fuel consumption and trips.',
-            textAlign: TextAlign.center,
-            style: GoogleFonts.inter(
-              fontSize: 13,
-              height: 1.5,
-              color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
-            ),
-          ),
-          const SizedBox(height: 28),
-          KeyedSubtree(
-            key: tutorialKey,
-            child: GradientButton(
-              label: 'Add First Vehicle',
-              onPressed: onAdd,
-              colors: [AppColors.emerald, AppColors.ocean],
-            ),
-          ),
-        ],
-      ),
-    ),
-  );
 }
 
 class _Label extends StatelessWidget {

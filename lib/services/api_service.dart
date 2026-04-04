@@ -5,12 +5,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 class ApiService {
   // Your laptop IP address - for local network connection
   static const String baseUrl = 'http://192.168.43.214:8080/api';
+  static const String wsUrl = 'http://192.168.43.214:8080/ws';
 
   // For Android emulator (use this only for emulator testing)
   // static const String baseUrl = 'http://10.0.2.2:8080/api';
+  // static const String wsUrl = 'http://10.0.2.2:8080/ws';
 
   // For iOS simulator
   // static const String baseUrl = 'http://localhost:8080/api';
+  // static const String wsUrl = 'http://localhost:8080/ws';
 
   static Future<String?> getToken() async {
     final prefs = await SharedPreferences.getInstance();
@@ -183,6 +186,74 @@ class ApiService {
         return {
           'success': false,
           'error': data['error'] ?? 'Failed to get profile',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
+  // ==================== QUOTA LIMIT APIs ====================
+
+  Future<Map<String, dynamic>> getAllQuotaLimits() async {
+    try {
+      final token = await getToken();
+      if (token == null) {
+        return {'success': false, 'error': 'Not authenticated'};
+      }
+
+      final response = await http
+          .get(
+            Uri.parse('$baseUrl/admin/quotas/limits'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 200) {
+        return {'success': true, 'data': data};
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to fetch quota limits',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
+  Future<Map<String, dynamic>> getQuotaLimitByVehicleType(
+    String vehicleType,
+  ) async {
+    try {
+      final token = await getToken();
+      if (token == null) {
+        return {'success': false, 'error': 'Not authenticated'};
+      }
+
+      final response = await http
+          .get(
+            Uri.parse('$baseUrl/admin/quotas/limits/$vehicleType'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 200) {
+        return {'success': true, 'data': data};
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to fetch quota limit',
         };
       }
     } catch (e) {
@@ -368,7 +439,6 @@ class ApiService {
         return {'success': false, 'error': 'Not authenticated'};
       }
 
-      // Ensure all required fields are present and not null
       final Map<String, dynamic> cleanData = {};
 
       if (logData.containsKey('userId') && logData['userId'] != null) {
@@ -421,15 +491,12 @@ class ApiService {
         return {'success': false, 'error': 'vehicleType is required'};
       }
 
-      // Optional fields
       if (logData.containsKey('stationName') &&
           logData['stationName'] != null) {
         cleanData['stationName'] = logData['stationName'];
       } else {
         cleanData['stationName'] = '';
       }
-
-      print('Sending fuel log data: $cleanData');
 
       final response = await http
           .post(
@@ -443,8 +510,6 @@ class ApiService {
           .timeout(const Duration(seconds: 30));
 
       final data = json.decode(response.body);
-      print('Response status: ${response.statusCode}');
-      print('Response body: $data');
 
       if (response.statusCode == 200) {
         return {'success': true, 'data': data};
@@ -455,7 +520,6 @@ class ApiService {
         };
       }
     } catch (e) {
-      print('Error adding fuel log: $e');
       return {'success': false, 'error': 'Network error: $e'};
     }
   }
@@ -844,8 +908,6 @@ class ApiService {
   Future<Map<String, dynamic>> deleteAccount(String nic, String reason) async {
     try {
       final token = await getToken();
-      // For delete account, we don't need token since user can't login
-      // But we still need to make the request
 
       final response = await http
           .delete(
@@ -858,7 +920,6 @@ class ApiService {
       final data = json.decode(response.body);
 
       if (response.statusCode == 200) {
-        // Clear any stored tokens
         await clearToken();
         return {'success': true, 'data': data};
       } else if (response.statusCode == 404) {
