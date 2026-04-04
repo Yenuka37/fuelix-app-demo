@@ -1,7 +1,8 @@
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/io.dart';
-import '../models/quota_model.dart';
-import '../services/api_service.dart';
+import '../models/notification_model.dart';
+import '../services/notification_service.dart';
+import 'api_service.dart';
 
 class QuotaWebSocketService {
   static QuotaWebSocketService? _instance;
@@ -20,7 +21,6 @@ class QuotaWebSocketService {
     if (_isConnected) return;
 
     try {
-      // Use WebSocket connection to backend
       final String wsUrl = ApiService.baseUrl
           .replaceFirst('http', 'ws')
           .replaceFirst('/api', '/ws');
@@ -38,7 +38,6 @@ class QuotaWebSocketService {
         onDone: () {
           print('WebSocket disconnected');
           _isConnected = false;
-          // Attempt to reconnect after 5 seconds
           Future.delayed(const Duration(seconds: 5), () {
             if (!_isConnected) connect();
           });
@@ -64,15 +63,25 @@ class QuotaWebSocketService {
   void _handleMessage(dynamic message) {
     try {
       final Map<String, dynamic> data = message is String
-          ? Map<String, dynamic>.from(_parseJson(message))
-          : message;
+          ? _parseJson(message)
+          : message as Map<String, dynamic>;
 
-      // Check if it's a quota update message
       if (data.containsKey('vehicleType') &&
           data.containsKey('oldQuota') &&
           data.containsKey('newQuota')) {
-        print(
-          'Quota update received: ${data['vehicleType']} -> ${data['newQuota']} L',
+        final vehicleType = data['vehicleType'] as String;
+        final oldQuota = (data['oldQuota'] as num).toDouble();
+        final newQuota = (data['newQuota'] as num).toDouble();
+        final updatedBy = data['updatedBy'] as String? ?? 'Admin';
+
+        print('Quota update received: $vehicleType -> $newQuota L');
+
+        // Add notification for the user
+        NotificationService.addQuotaUpdateNotification(
+          vehicleType: vehicleType,
+          oldQuota: oldQuota,
+          newQuota: newQuota,
+          updatedBy: updatedBy,
         );
 
         // Notify all listeners
@@ -86,10 +95,22 @@ class QuotaWebSocketService {
   }
 
   Map<String, dynamic> _parseJson(String jsonStr) {
-    // Simple JSON parsing without dart:convert import in this file
-    // In production, use proper JSON decoding
+    // Simple parsing - in production use proper JSON decoder
     final Map<String, dynamic> result = {};
-    // This is a simplified version - use proper JSON parsing
+    final cleaned = jsonStr.replaceAll('{', '').replaceAll('}', '');
+    final pairs = cleaned.split(',');
+    for (var pair in pairs) {
+      final parts = pair.split(':');
+      if (parts.length == 2) {
+        final key = parts[0].trim().replaceAll('"', '');
+        var value = parts[1].trim().replaceAll('"', '');
+        if (double.tryParse(value) != null) {
+          result[key] = double.parse(value);
+        } else {
+          result[key] = value;
+        }
+      }
+    }
     return result;
   }
 

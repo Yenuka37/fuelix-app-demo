@@ -1,21 +1,17 @@
 import '../models/quota_model.dart';
 import 'api_service.dart';
 
-/// Pure business-logic service with dynamic quota limits from backend
 class QuotaService {
   QuotaService._();
 
   static final ApiService _apiService = ApiService();
   static Map<String, double> _cachedQuotaLimits = {};
 
-  /// Get quota for vehicle type - fetches from backend or uses cache
   static Future<double> getQuotaForVehicleType(String vehicleType) async {
-    // Try to get from cache first
     if (_cachedQuotaLimits.containsKey(vehicleType)) {
       return _cachedQuotaLimits[vehicleType]!;
     }
 
-    // Fetch from API
     try {
       final result = await _apiService.getQuotaLimitByVehicleType(vehicleType);
       if (result['success']) {
@@ -27,7 +23,6 @@ class QuotaService {
       print('Error fetching quota from API: $e');
     }
 
-    // Fallback to default values if API fails
     const defaultQuotas = {
       'Car': 25.0,
       'Van': 25.0,
@@ -40,18 +35,15 @@ class QuotaService {
     return defaultQuotas[vehicleType] ?? 0.0;
   }
 
-  /// Update cached quota value (called when WebSocket receives update)
   static void updateCachedQuota(String vehicleType, double newQuota) {
     _cachedQuotaLimits[vehicleType] = newQuota;
     print('📊 Quota cache updated: $vehicleType -> $newQuota L');
   }
 
-  /// Clear all cached quotas
   static void clearCache() {
     _cachedQuotaLimits.clear();
   }
 
-  // ── Week boundary helpers (Mon–Sun) ───────────────────────────────────────
   static DateTime weekStart(DateTime date) {
     final d = date.toLocal();
     return DateTime(d.year, d.month, d.day - (d.weekday - 1));
@@ -67,7 +59,6 @@ class QuotaService {
     return !d.isBefore(q.weekStart) && !d.isAfter(q.weekEnd);
   }
 
-  // ── New week record (quota resets — balance does NOT carry over) ──────────
   static Future<FuelQuotaModel> newWeekQuota(
     int vehicleId,
     String vehicleType,
@@ -83,7 +74,6 @@ class QuotaService {
     );
   }
 
-  // ── Display helpers ───────────────────────────────────────────────────────
   static String daysRemainingLabel(DateTime now) {
     final diff = weekEnd(now).difference(now.toLocal());
     final days = diff.inDays;
