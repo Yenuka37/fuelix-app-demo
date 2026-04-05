@@ -56,7 +56,9 @@ class _TopUpScreenState extends State<TopUpScreen>
   // Tutorial keys
   final _keyPresets = GlobalKey();
   final _keyCustomAmount = GlobalKey();
-  final _keyPaymentMethods = GlobalKey();
+  final _keyPaymentMethod1 = GlobalKey();
+  final _keyPaymentMethod2 = GlobalKey();
+  final _keyPaymentMethod3 = GlobalKey();
   final _keyTopUpButton = GlobalKey();
   final _keyHistoryList = GlobalKey();
   bool _showTour = false;
@@ -69,6 +71,11 @@ class _TopUpScreenState extends State<TopUpScreen>
       duration: const Duration(milliseconds: 450),
     );
     _fadeAnim = CurvedAnimation(parent: _animCtrl, curve: Curves.easeOut);
+    _customCtrl.addListener(() {
+      if (_customCtrl.text.isNotEmpty) {
+        setState(() => _selectedAmount = null);
+      }
+    });
     _checkTopUpTour();
   }
 
@@ -301,7 +308,9 @@ class _TopUpScreenState extends State<TopUpScreen>
                           onTopUp: _processTopUp,
                           presetKey: _keyPresets,
                           customKey: _keyCustomAmount,
-                          methodsKey: _keyPaymentMethods,
+                          method1Key: _keyPaymentMethod1,
+                          method2Key: _keyPaymentMethod2,
+                          method3Key: _keyPaymentMethod3,
                           buttonKey: _keyTopUpButton,
                         )
                       : KeyedSubtree(
@@ -340,7 +349,7 @@ class _TopUpScreenState extends State<TopUpScreen>
           position: TooltipPosition.below,
         ),
         TourStep(
-          targetKey: _keyPaymentMethods,
+          targetKey: _keyPaymentMethod1,
           title: 'Payment Method',
           body: 'Choose your preferred payment method. All are secure.',
           icon: Icons.payment_rounded,
@@ -627,7 +636,12 @@ class _TopUpForm extends StatelessWidget {
   final VoidCallback onClearPreset;
   final ValueChanged<int> onMethodSelect;
   final VoidCallback onTopUp;
-  final Key? presetKey, customKey, methodsKey, buttonKey;
+  final Key? presetKey,
+      customKey,
+      method1Key,
+      method2Key,
+      method3Key,
+      buttonKey;
 
   const _TopUpForm({
     required this.isDark,
@@ -641,7 +655,9 @@ class _TopUpForm extends StatelessWidget {
     required this.onTopUp,
     this.presetKey,
     this.customKey,
-    this.methodsKey,
+    this.method1Key,
+    this.method2Key,
+    this.method3Key,
     this.buttonKey,
   });
 
@@ -659,7 +675,8 @@ class _TopUpForm extends StatelessWidget {
             child: Wrap(
               spacing: 10,
               runSpacing: 10,
-              children: _kPresets.map((a) {
+              children: _kPresets.asMap().entries.map((entry) {
+                final a = entry.value;
                 final selected = a == selectedAmount;
                 return GestureDetector(
                   onTap: () => onPreset(a),
@@ -729,96 +746,41 @@ class _TopUpForm extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           _SectionLabel('Payment Method', isDark),
-          KeyedSubtree(
-            key: methodsKey,
-            child: Column(
-              children: List.generate(_kMethods.length, (i) {
-                final method = _kMethods[i];
-                final sel = i == selectedMethod;
-                return GestureDetector(
-                  onTap: () => onMethodSelect(i),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    margin: const EdgeInsets.only(bottom: 10),
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(14),
-                      color: sel
-                          ? method.color.withOpacity(isDark ? 0.14 : 0.08)
-                          : (isDark
-                                ? AppColors.darkSurface
-                                : AppColors.lightSurface),
-                      border: Border.all(
-                        color: sel
-                            ? method.color.withOpacity(0.5)
-                            : (isDark
-                                  ? AppColors.darkBorder
-                                  : AppColors.lightBorder),
-                        width: sel ? 1.5 : 1,
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(11),
-                            color: method.color.withOpacity(
-                              isDark ? 0.18 : 0.10,
-                            ),
-                          ),
-                          child: Icon(
-                            method.icon,
-                            size: 20,
-                            color: method.color,
-                          ),
-                        ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Text(
-                            method.label,
-                            style: GoogleFonts.spaceGrotesk(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: sel
-                                  ? method.color
-                                  : (isDark
-                                        ? AppColors.darkText
-                                        : AppColors.lightText),
-                            ),
-                          ),
-                        ),
-                        AnimatedContainer(
-                          duration: const Duration(milliseconds: 180),
-                          width: 20,
-                          height: 20,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: sel
-                                  ? method.color
-                                  : (isDark
-                                        ? AppColors.darkBorder
-                                        : AppColors.lightBorder),
-                              width: 2,
-                            ),
-                            color: sel ? method.color : Colors.transparent,
-                          ),
-                          child: sel
-                              ? const Icon(
-                                  Icons.check_rounded,
-                                  size: 11,
-                                  color: Colors.white,
-                                )
-                              : null,
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              }),
-            ),
+          Column(
+            children: [
+              KeyedSubtree(
+                key: method1Key,
+                child: _PaymentMethodTile(
+                  method: _kMethods[0],
+                  index: 0,
+                  selectedMethod: selectedMethod,
+                  isDark: isDark,
+                  onSelect: onMethodSelect,
+                ),
+              ),
+              const SizedBox(height: 10),
+              KeyedSubtree(
+                key: method2Key,
+                child: _PaymentMethodTile(
+                  method: _kMethods[1],
+                  index: 1,
+                  selectedMethod: selectedMethod,
+                  isDark: isDark,
+                  onSelect: onMethodSelect,
+                ),
+              ),
+              const SizedBox(height: 10),
+              KeyedSubtree(
+                key: method3Key,
+                child: _PaymentMethodTile(
+                  method: _kMethods[2],
+                  index: 2,
+                  selectedMethod: selectedMethod,
+                  isDark: isDark,
+                  onSelect: onMethodSelect,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 10),
           Container(
@@ -860,6 +822,93 @@ class _TopUpForm extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _PaymentMethodTile extends StatelessWidget {
+  final _PayMethod method;
+  final int index, selectedMethod;
+  final bool isDark;
+  final ValueChanged<int> onSelect;
+
+  const _PaymentMethodTile({
+    required this.method,
+    required this.index,
+    required this.selectedMethod,
+    required this.isDark,
+    required this.onSelect,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final sel = index == selectedMethod;
+    return GestureDetector(
+      onTap: () => onSelect(index),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          color: sel
+              ? method.color.withOpacity(isDark ? 0.14 : 0.08)
+              : (isDark ? AppColors.darkSurface : AppColors.lightSurface),
+          border: Border.all(
+            color: sel
+                ? method.color.withOpacity(0.5)
+                : (isDark ? AppColors.darkBorder : AppColors.lightBorder),
+            width: sel ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(11),
+                color: method.color.withOpacity(isDark ? 0.18 : 0.10),
+              ),
+              child: Icon(method.icon, size: 20, color: method.color),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(
+                method.label,
+                style: GoogleFonts.spaceGrotesk(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: sel
+                      ? method.color
+                      : (isDark ? AppColors.darkText : AppColors.lightText),
+                ),
+              ),
+            ),
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              width: 20,
+              height: 20,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: sel
+                      ? method.color
+                      : (isDark ? AppColors.darkBorder : AppColors.lightBorder),
+                  width: 2,
+                ),
+                color: sel ? method.color : Colors.transparent,
+              ),
+              child: sel
+                  ? const Icon(
+                      Icons.check_rounded,
+                      size: 11,
+                      color: Colors.white,
+                    )
+                  : null,
+            ),
+          ],
+        ),
       ),
     );
   }

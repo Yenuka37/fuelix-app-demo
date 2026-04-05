@@ -11,34 +11,19 @@ import '../services/tutorial_service.dart';
 import '../widgets/custom_button.dart';
 import '../widgets/tutorial_overlay.dart';
 
-// Fuel grade catalogue
+// Fuel grade model from backend
 class FuelGrade {
+  final int id;
   final String name;
   final double pricePerLitre;
-  const FuelGrade(this.name, this.pricePerLitre);
-}
+  final String fuelType;
 
-class FuelCatalogue {
-  static const List<FuelGrade> petrolGrades = [
-    FuelGrade('Petrol 92', 317),
-    FuelGrade('Petrol 95', 365),
-  ];
-
-  static const List<FuelGrade> dieselGrades = [
-    FuelGrade('Auto Diesel', 303),
-    FuelGrade('Super Diesel', 353),
-  ];
-
-  static const List<FuelGrade> keroseneGrades = [FuelGrade('Kerosene', 195)];
-
-  static List<FuelGrade> gradesFor(String fuelType) {
-    final f = fuelType.toLowerCase();
-    final List<FuelGrade> result = [];
-    if (f == 'petrol' || f == 'hybrid') result.addAll(petrolGrades);
-    if (f == 'diesel' || f == 'hybrid') result.addAll(dieselGrades);
-    if (f == 'kerosene') result.addAll(keroseneGrades);
-    return result;
-  }
+  const FuelGrade({
+    required this.id,
+    required this.name,
+    required this.pricePerLitre,
+    required this.fuelType,
+  });
 }
 
 class FuelLogScreen extends StatefulWidget {
@@ -73,6 +58,8 @@ class _FuelLogScreenState extends State<FuelLogScreen>
   double _quotaRemaining = 0;
   double _walletBalance = 0;
   bool _limitsLoaded = false;
+  List<VehicleModel> _vehicles = [];
+  List<FuelGrade> _allFuelGrades = [];
 
   late AnimationController _animCtrl;
   late Animation<double> _fadeAnim;
@@ -103,10 +90,16 @@ class _FuelLogScreenState extends State<FuelLogScreen>
       duration: const Duration(milliseconds: 400),
     );
     _fadeAnim = CurvedAnimation(parent: _animCtrl, curve: Curves.easeOut);
-    _selectedVehicle = widget.vehicles.first;
+
+    _vehicles = List.from(widget.vehicles);
     _walletBalance = widget.walletBalance;
-    _litresCtrl.addListener(() => setState(() {}));
-    _refreshGradesAndLimits();
+
+    if (_vehicles.isNotEmpty) {
+      _selectedVehicle = _vehicles.first;
+      _litresCtrl.addListener(() => setState(() {}));
+      _loadFuelPrices();
+    }
+
     _animCtrl.forward();
     _checkFuelLogTour();
   }
@@ -127,10 +120,69 @@ class _FuelLogScreenState extends State<FuelLogScreen>
     }
   }
 
+  // Load fuel prices from backend
+  Future<void> _loadFuelPrices() async {
+    try {
+      final result = await _apiService.getFuelPrices();
+      if (result['success'] && mounted) {
+        List<dynamic> pricesJson = result['data'];
+        _allFuelGrades = pricesJson
+            .map(
+              (json) => FuelGrade(
+                id: json['id'],
+                name: json['fuelGrade'],
+                pricePerLitre: (json['pricePerLitre'] as num).toDouble(),
+                fuelType: json['fuelType'],
+              ),
+            )
+            .toList();
+
+        await _refreshGradesAndLimits();
+      } else {
+        print('Failed to load fuel prices: ${result['error']}');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Failed to load fuel prices. Please check your connection.',
+              ),
+              backgroundColor: AppColors.error,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      print('Error loading fuel prices: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to load fuel prices. Please try again.'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _refreshGradesAndLimits() async {
+    if (_vehicles.isEmpty) {
+      setState(() => _limitsLoaded = true);
+      return;
+    }
+
     setState(() => _limitsLoaded = false);
 
-    final grades = FuelCatalogue.gradesFor(_selectedVehicle.fuelType);
+    // Filter grades by vehicle fuel type
+    final grades = _allFuelGrades.where((g) {
+      if (_selectedVehicle.fuelType.toLowerCase() == 'hybrid') {
+        return g.fuelType.toLowerCase() == 'petrol' ||
+            g.fuelType.toLowerCase() == 'diesel';
+      }
+      return g.fuelType.toLowerCase() ==
+          _selectedVehicle.fuelType.toLowerCase();
+    }).toList();
+
+    // Get fresh quota from API
     final quotaResult = await _apiService.getCurrentQuota(
       _selectedVehicle.id!,
       _selectedVehicle.type,
@@ -141,11 +193,19 @@ class _FuelLogScreenState extends State<FuelLogScreen>
       remaining = quotaResult['data']['remainingLitres']?.toDouble() ?? 0;
     }
 
+    // Get fresh wallet balance
+    final walletResult = await _apiService.getWallet(widget.user.id!);
+    double freshBalance = widget.walletBalance;
+    if (walletResult['success']) {
+      freshBalance = (walletResult['data']['balance'] as num).toDouble();
+    }
+
     if (!mounted) return;
     setState(() {
       _availableGrades = grades;
       _selectedGrade = grades.isNotEmpty ? grades.first : null;
       _quotaRemaining = remaining;
+      _walletBalance = freshBalance;
       _limitsLoaded = true;
       _litresCtrl.clear();
     });
@@ -158,7 +218,6 @@ class _FuelLogScreenState extends State<FuelLogScreen>
     setState(() => _isSaving = true);
 
     final litres = double.parse(_litresCtrl.text.trim());
-    final cost = litres * _selectedGrade!.pricePerLitre;
 
     final logData = {
       'userId': widget.user.id!,
@@ -166,10 +225,8 @@ class _FuelLogScreenState extends State<FuelLogScreen>
       'litres': litres,
       'fuelType': _selectedVehicle.fuelType,
       'fuelGrade': _selectedGrade!.name,
-      'pricePerLitre': _selectedGrade!.pricePerLitre,
-      'totalCost': cost,
-      'stationName': _stationCtrl.text.trim(),
       'vehicleType': _selectedVehicle.type,
+      'stationName': _stationCtrl.text.trim(),
     };
 
     final result = await _apiService.addFuelLog(logData);
@@ -178,12 +235,18 @@ class _FuelLogScreenState extends State<FuelLogScreen>
     setState(() => _isSaving = false);
 
     if (result['success']) {
-      Navigator.pop(context, true);
-      showAppSnackbar(
-        context,
-        message: 'Fuel log saved successfully!',
-        isSuccess: true,
-      );
+      // Refresh data after successful fuel log
+      await _loadFuelPrices();
+      await _refreshVehicles();
+
+      if (mounted) {
+        Navigator.pop(context, true);
+        showAppSnackbar(
+          context,
+          message: 'Fuel log saved successfully!',
+          isSuccess: true,
+        );
+      }
     } else if (result['error'].contains('quota')) {
       showAppSnackbar(
         context,
@@ -203,6 +266,56 @@ class _FuelLogScreenState extends State<FuelLogScreen>
         message: 'Failed to save log. Please try again.',
         isError: true,
       );
+    }
+  }
+
+  // Refresh vehicles from API
+  Future<void> _refreshVehicles() async {
+    try {
+      final result = await _apiService.getVehicles(widget.user.id!);
+      if (result['success'] && mounted) {
+        List<dynamic> vehiclesJson = result['data'];
+        List<VehicleModel> freshVehicles = vehiclesJson
+            .map(
+              (json) => VehicleModel(
+                id: json['id'],
+                userId: json['userId'],
+                type: json['type'],
+                make: json['make'],
+                model: json['model'],
+                year: json['year'],
+                registrationNo: json['registrationNo'],
+                fuelType: json['fuelType'],
+                engineCC: json['engineCC'] ?? '',
+                color: json['color'] ?? '',
+                fuelPassCode: json['fuelPassCode'],
+                qrGeneratedAt: json['qrGeneratedAt'] != null
+                    ? DateTime.tryParse(json['qrGeneratedAt'])
+                    : null,
+                createdAt: json['createdAt'] != null
+                    ? DateTime.tryParse(json['createdAt'])
+                    : null,
+              ),
+            )
+            .toList();
+
+        setState(() {
+          _vehicles = freshVehicles;
+        });
+
+        if (_vehicles.isNotEmpty && !_vehicles.contains(_selectedVehicle)) {
+          setState(() {
+            _selectedVehicle = _vehicles.first;
+          });
+          await _refreshGradesAndLimits();
+        } else if (_vehicles.isEmpty) {
+          setState(() {
+            _limitsLoaded = true;
+          });
+        }
+      }
+    } catch (e) {
+      print('Error refreshing vehicles: $e');
     }
   }
 
@@ -263,6 +376,32 @@ class _FuelLogScreenState extends State<FuelLogScreen>
                           style: Theme.of(context).textTheme.headlineMedium,
                         ),
                       ),
+                      // Refresh button
+                      GestureDetector(
+                        onTap: _refreshVehicles,
+                        child: Container(
+                          width: 42,
+                          height: 42,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            color: isDark
+                                ? AppColors.darkSurfaceAlt
+                                : AppColors.lightSurfaceAlt,
+                            border: Border.all(
+                              color: isDark
+                                  ? AppColors.darkBorder
+                                  : AppColors.lightBorder,
+                            ),
+                          ),
+                          child: Icon(
+                            Icons.refresh_rounded,
+                            size: 18,
+                            color: isDark
+                                ? AppColors.darkTextSub
+                                : AppColors.lightTextSub,
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -275,95 +414,100 @@ class _FuelLogScreenState extends State<FuelLogScreen>
                   child: SingleChildScrollView(
                     physics: const BouncingScrollPhysics(),
                     padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
-                    child: Form(
-                      key: _formKey,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Vehicle selector
-                          _sectionLabel('Vehicle', isDark),
-                          const SizedBox(height: 8),
-                          KeyedSubtree(
-                            key: _keyVehicleSelector,
-                            child: _dropdown<VehicleModel>(
-                              isDark: isDark,
-                              value: _selectedVehicle,
-                              items: widget.vehicles,
-                              itemLabel: (v) =>
-                                  '${v.shortDisplay} · ${v.registrationNo}',
-                              onChanged: (v) async {
-                                if (v == null) return;
-                                setState(() => _selectedVehicle = v);
-                                await _refreshGradesAndLimits();
-                              },
+                    child: _vehicles.isEmpty
+                        ? _buildEmptyVehiclesState(isDark)
+                        : Form(
+                            key: _formKey,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Vehicle selector
+                                _sectionLabel('Vehicle', isDark),
+                                const SizedBox(height: 8),
+                                KeyedSubtree(
+                                  key: _keyVehicleSelector,
+                                  child: _dropdown<VehicleModel>(
+                                    isDark: isDark,
+                                    value: _selectedVehicle,
+                                    items: _vehicles,
+                                    itemLabel: (v) =>
+                                        '${v.shortDisplay} · ${v.registrationNo}',
+                                    onChanged: (v) async {
+                                      if (v == null) return;
+                                      setState(() => _selectedVehicle = v);
+                                      await _refreshGradesAndLimits();
+                                    },
+                                  ),
+                                ),
+                                const SizedBox(height: 20),
+
+                                // Quota + wallet info bar
+                                if (_limitsLoaded)
+                                  _buildLimitsBar(isDark)
+                                else
+                                  const Center(
+                                    child: Padding(
+                                      padding: EdgeInsets.symmetric(
+                                        vertical: 12,
+                                      ),
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: AppColors.emerald,
+                                      ),
+                                    ),
+                                  ),
+                                const SizedBox(height: 20),
+
+                                // Fuel grade selector
+                                if (_availableGrades.isEmpty) ...[
+                                  _buildUnsupportedFuelNote(isDark),
+                                ] else ...[
+                                  _sectionLabel('Fuel Grade', isDark),
+                                  const SizedBox(height: 10),
+                                  KeyedSubtree(
+                                    key: _keyGradeSelector,
+                                    child: _buildGradeSelector(isDark),
+                                  ),
+                                  const SizedBox(height: 20),
+
+                                  // Litres field
+                                  _sectionLabel('Litres Filled', isDark),
+                                  const SizedBox(height: 8),
+                                  KeyedSubtree(
+                                    key: _keyLitresField,
+                                    child: _buildLitresField(isDark),
+                                  ),
+                                  const SizedBox(height: 20),
+
+                                  // Station name
+                                  AppTextField(
+                                    label: 'Station Name (optional)',
+                                    hint: 'e.g. CPC Colombo 7',
+                                    controller: _stationCtrl,
+                                    prefixIcon: Icons.place_outlined,
+                                  ),
+                                  const SizedBox(height: 20),
+
+                                  // Cost preview
+                                  if (_totalCost > 0) _buildCostPreview(isDark),
+                                  const SizedBox(height: 8),
+
+                                  // Save button
+                                  KeyedSubtree(
+                                    key: _keySaveButton,
+                                    child: GradientButton(
+                                      label: 'Save Fuel Log',
+                                      onPressed:
+                                          (_limitsLoaded && _maxLitres > 0)
+                                          ? _save
+                                          : null,
+                                      isLoading: _isSaving,
+                                    ),
+                                  ),
+                                ],
+                              ],
                             ),
                           ),
-                          const SizedBox(height: 20),
-
-                          // Quota + wallet info bar
-                          if (_limitsLoaded)
-                            _buildLimitsBar(isDark)
-                          else
-                            const Center(
-                              child: Padding(
-                                padding: EdgeInsets.symmetric(vertical: 12),
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: AppColors.emerald,
-                                ),
-                              ),
-                            ),
-                          const SizedBox(height: 20),
-
-                          // Fuel grade selector
-                          if (_availableGrades.isEmpty) ...[
-                            _buildUnsupportedFuelNote(isDark),
-                          ] else ...[
-                            _sectionLabel('Fuel Grade', isDark),
-                            const SizedBox(height: 10),
-                            KeyedSubtree(
-                              key: _keyGradeSelector,
-                              child: _buildGradeSelector(isDark),
-                            ),
-                            const SizedBox(height: 20),
-
-                            // Litres field
-                            _sectionLabel('Litres Filled', isDark),
-                            const SizedBox(height: 8),
-                            KeyedSubtree(
-                              key: _keyLitresField,
-                              child: _buildLitresField(isDark),
-                            ),
-                            const SizedBox(height: 20),
-
-                            // Station name
-                            AppTextField(
-                              label: 'Station Name (optional)',
-                              hint: 'e.g. CPC Colombo 7',
-                              controller: _stationCtrl,
-                              prefixIcon: Icons.place_outlined,
-                            ),
-                            const SizedBox(height: 20),
-
-                            // Cost preview
-                            if (_totalCost > 0) _buildCostPreview(isDark),
-                            const SizedBox(height: 8),
-
-                            // Save button
-                            KeyedSubtree(
-                              key: _keySaveButton,
-                              child: GradientButton(
-                                label: 'Save Fuel Log',
-                                onPressed: (_limitsLoaded && _maxLitres > 0)
-                                    ? _save
-                                    : null,
-                                isLoading: _isSaving,
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
                   ),
                 ),
               ],
@@ -389,7 +533,7 @@ class _FuelLogScreenState extends State<FuelLogScreen>
         TourStep(
           targetKey: _keyGradeSelector,
           title: 'Choose Fuel Grade',
-          body: 'Select the correct fuel grade. Prices are fixed per grade.',
+          body: 'Select the correct fuel grade. Prices are updated by admin.',
           icon: Icons.local_gas_station_rounded,
           gradient: [AppColors.emerald, AppColors.ocean],
           position: TooltipPosition.below,
@@ -417,6 +561,60 @@ class _FuelLogScreenState extends State<FuelLogScreen>
         if (mounted) setState(() => _showTour = false);
       },
       child: screen,
+    );
+  }
+
+  Widget _buildEmptyVehiclesState(bool isDark) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 80,
+            height: 80,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                colors: [
+                  AppColors.emerald.withOpacity(0.15),
+                  AppColors.ocean.withOpacity(0.15),
+                ],
+              ),
+            ),
+            child: Icon(
+              Icons.directions_car_outlined,
+              size: 38,
+              color: isDark
+                  ? AppColors.darkTextMuted
+                  : AppColors.lightTextMuted,
+            ),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            'No Vehicles Found',
+            style: GoogleFonts.spaceGrotesk(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: isDark ? AppColors.darkText : AppColors.lightText,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Please add a vehicle first before logging fuel.',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
+            ),
+          ),
+          const SizedBox(height: 28),
+          GradientButton(
+            label: 'Go to Vehicles',
+            onPressed: () => Navigator.pop(context),
+            colors: [AppColors.emerald, AppColors.ocean],
+          ),
+        ],
+      ),
     );
   }
 
@@ -673,17 +871,15 @@ class _FuelLogScreenState extends State<FuelLogScreen>
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(14),
-        gradient: LinearGradient(
-          colors: affordable
-              ? [
-                  AppColors.emerald.withOpacity(0.12),
-                  AppColors.ocean.withOpacity(0.10),
-                ]
-              : [
-                  AppColors.error.withOpacity(0.10),
-                  AppColors.error.withOpacity(0.06),
-                ],
-        ),
+        gradient: affordable
+            ? [
+                AppColors.emerald.withOpacity(0.12),
+                AppColors.ocean.withOpacity(0.10),
+              ].asGradient()
+            : [
+                AppColors.error.withOpacity(0.10),
+                AppColors.error.withOpacity(0.06),
+              ].asGradient(),
         border: Border.all(
           color: affordable
               ? AppColors.emerald.withOpacity(0.25)
@@ -842,6 +1038,17 @@ class _FuelLogScreenState extends State<FuelLogScreen>
           onChanged: onChanged,
         ),
       ),
+    );
+  }
+}
+
+// Extension for gradient from list
+extension ListGradient on List<Color> {
+  LinearGradient asGradient() {
+    return LinearGradient(
+      colors: this,
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
     );
   }
 }

@@ -286,10 +286,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                 child: Row(
                   children: [
                     GestureDetector(
-                      onTap: () => Navigator.pop(
-                        context,
-                        true,
-                      ), // Return true to trigger refresh
+                      onTap: () => Navigator.pop(context, true),
                       child: Container(
                         width: 42,
                         height: 42,
@@ -1100,7 +1097,11 @@ class _NotificationDetailDialogState extends State<NotificationDetailDialog>
             const SizedBox(height: 8),
             _infoRow('Vehicle Type:', vehicleType, isDark),
             _infoRow('Old Quota:', '$oldQuota L', isDark),
-            _infoRow('New Quota:', '$newQuota L', isDark),
+            _infoRow(
+              'New Quota:',
+              '$newQuota L (effective next Monday)',
+              isDark,
+            ),
             _infoRow('Updated By:', updatedBy, isDark),
             _infoRow('Effective Date:', effectiveDate, isDark),
           ],

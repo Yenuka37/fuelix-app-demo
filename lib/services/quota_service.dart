@@ -23,16 +23,10 @@ class QuotaService {
       print('Error fetching quota from API: $e');
     }
 
-    const defaultQuotas = {
-      'Car': 25.0,
-      'Van': 25.0,
-      'Motorcycle': 2.0,
-      'Truck': 20.0,
-      'Bus': 45.0,
-      'Three-Wheeler': 15.0,
-    };
-
-    return defaultQuotas[vehicleType] ?? 0.0;
+    // No fallback mock data - throw error if API fails
+    throw Exception(
+      'Failed to load quota from server. Please check your connection.',
+    );
   }
 
   static void updateCachedQuota(String vehicleType, double newQuota) {

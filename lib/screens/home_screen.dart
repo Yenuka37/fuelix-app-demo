@@ -147,8 +147,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       final data = result['data'];
       final wallet = WalletModel(
         userId: _user!.id!,
-        balance: data['balance'],
-        updatedAt: DateTime.tryParse(data['updatedAt']),
+        balance: (data['balance'] as num).toDouble(),
+        updatedAt: data['updatedAt'] != null
+            ? DateTime.tryParse(data['updatedAt'])
+            : null,
       );
       if (mounted) setState(() => _wallet = wallet);
     } else {
@@ -182,11 +184,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               id: json['id'],
               userId: json['userId'],
               vehicleId: json['vehicleId'],
-              litres: json['litres'],
+              litres: (json['litres'] as num).toDouble(),
               fuelType: json['fuelType'],
               fuelGrade: json['fuelGrade'],
-              pricePerLitre: json['pricePerLitre'],
-              totalCost: json['totalCost'],
+              pricePerLitre: (json['pricePerLitre'] as num).toDouble(),
+              totalCost: (json['totalCost'] as num).toDouble(),
               stationName: json['stationName'] ?? '',
               loggedAt: DateTime.parse(json['loggedAt']),
             ),
@@ -235,7 +237,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       '/vehicles',
       arguments: _user,
     );
-    if (result == true) _loadVehicles();
+    if (result == true) {
+      await _loadVehicles();
+      await _loadFuelData();
+    }
   }
 
   void _goToTopUp() async {
@@ -244,7 +249,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       '/topup',
       arguments: _user,
     );
-    if (result == true) _loadWallet();
+    if (result == true) {
+      await _loadWallet();
+      await _loadVehicles();
+      await _loadFuelData();
+    }
   }
 
   void _goToFuelStations() {

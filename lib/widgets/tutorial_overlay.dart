@@ -47,6 +47,7 @@ class _SpotlightTourState extends State<SpotlightTour>
   int _step = 0;
   Rect? _targetRect;
   bool _visible = true;
+  ScrollableState? _scrollableState;
 
   late AnimationController _animCtrl;
   late Animation<double> _fadeAnim;
@@ -64,13 +65,69 @@ class _SpotlightTourState extends State<SpotlightTour>
       begin: 0.92,
       end: 1.0,
     ).animate(CurvedAnimation(parent: _animCtrl, curve: Curves.easeOut));
-    WidgetsBinding.instance.addPostFrameCallback((_) => _measure());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _measureAndScroll());
   }
 
   @override
   void dispose() {
     _animCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _measureAndScroll() async {
+    await _scrollToTarget();
+    _measure();
+  }
+
+  Future<void> _scrollToTarget() async {
+    if (_step >= widget.steps.length) return;
+
+    final ctx = widget.steps[_step].targetKey.currentContext;
+    if (ctx == null) return;
+
+    // Find the scrollable ancestor
+    final scrollable = Scrollable.maybeOf(ctx);
+    if (scrollable == null) return;
+
+    final renderBox = ctx.findRenderObject() as RenderBox?;
+    if (renderBox == null) return;
+
+    final position = renderBox.localToGlobal(Offset.zero);
+    final size = renderBox.size;
+    final screenHeight = MediaQuery.of(context).size.height;
+    final targetTop = position.dy;
+    final targetBottom = position.dy + size.height;
+
+    // Check if target is visible
+    const padding = 100.0;
+    final isVisible =
+        targetTop >= padding && targetBottom <= screenHeight - padding;
+
+    if (!isVisible) {
+      // Scroll to make target visible
+      final scrollController = _findScrollController(ctx);
+      if (scrollController != null) {
+        final targetOffset = targetTop - (screenHeight / 2) + (size.height / 2);
+        await scrollController.animateTo(
+          targetOffset.clamp(0.0, scrollController.position.maxScrollExtent),
+          duration: const Duration(milliseconds: 400),
+          curve: Curves.easeOut,
+        );
+        // Wait for scroll animation to complete
+        await Future.delayed(const Duration(milliseconds: 450));
+      }
+    }
+  }
+
+  ScrollController? _findScrollController(BuildContext context) {
+    ScrollableState? scrollable = Scrollable.maybeOf(context);
+    while (scrollable != null) {
+      if (scrollable.widget.controller != null) {
+        return scrollable.widget.controller;
+      }
+      scrollable = Scrollable.maybeOf(scrollable.context);
+    }
+    return null;
   }
 
   void _measure() {
@@ -104,7 +161,7 @@ class _SpotlightTourState extends State<SpotlightTour>
         _step++;
         _targetRect = null;
       });
-      WidgetsBinding.instance.addPostFrameCallback((_) => _measure());
+      WidgetsBinding.instance.addPostFrameCallback((_) => _measureAndScroll());
     } else {
       setState(() => _visible = false);
       widget.onComplete();
@@ -165,21 +222,18 @@ class _SpotlightOverlay extends StatelessWidget {
     final isLast = stepIndex == totalSteps - 1;
 
     // ── Decide whether card goes above or below target ────────────────────
-    const hPad = 20.0; // horizontal screen padding
-    const arrowH = 12.0; // arrow triangle height
-    const vGap = 8.0; // gap between arrow and target
+    const hPad = 20.0;
+    const arrowH = 12.0;
+    const vGap = 8.0;
 
-    // Space available above / below
     final spaceBelow = screenSize.height - targetRect.bottom - arrowH - vGap;
     final spaceAbove = targetRect.top - arrowH - vGap;
 
-    // Place below unless position==above AND there's enough room above
     final bool placeBelow =
-        (step.position == TooltipPosition.above && spaceAbove > 160)
+        (step.position == TooltipPosition.above && spaceAbove > 180)
         ? false
         : true;
 
-    // Arrow tip X = center of target, clamped to card interior
     final cardLeft = hPad;
     final cardRight = screenSize.width - hPad;
     final arrowTipX = targetRect.center.dx.clamp(cardLeft + 24, cardRight - 24);
@@ -221,15 +275,12 @@ class _SpotlightOverlay extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Arrow pointing UP (card is below target)
                   if (placeBelow)
                     _Arrow(
                       up: true,
                       tipX: arrowTipX - hPad,
                       color: step.gradient.first,
                     ),
-
-                  // Card
                   _TooltipCard(
                     step: step,
                     stepIndex: stepIndex,
@@ -239,8 +290,6 @@ class _SpotlightOverlay extends StatelessWidget {
                     onNext: onNext,
                     onSkip: onSkip,
                   ),
-
-                  // Arrow pointing DOWN (card is above target)
                   if (!placeBelow)
                     _Arrow(
                       up: false,
@@ -470,11 +519,7 @@ class _TooltipCard extends StatelessWidget {
 // Arrow — tip aligned to target center
 // ═════════════════════════════════════════════════════════════════════════════
 class _Arrow extends StatelessWidget {
-  /// [up] = true  → triangle points UP   (card is below target)
-  /// [up] = false → triangle points DOWN (card is above target)
   final bool up;
-
-  /// X offset of the arrow tip from the LEFT edge of the card.
   final double tipX;
   final Color color;
 
@@ -505,17 +550,15 @@ class _ArrowPainter extends CustomPainter {
       ..color = color
       ..style = PaintingStyle.fill;
 
-    const hw = 14.0; // half-width of arrow base
+    const hw = 14.0;
     final cx = tipX.clamp(hw + 2, size.width - hw - 2);
 
     final path = Path();
     if (up) {
-      // Tip points up
       path.moveTo(cx, 0);
       path.lineTo(cx - hw, size.height);
       path.lineTo(cx + hw, size.height);
     } else {
-      // Tip points down
       path.moveTo(cx, size.height);
       path.lineTo(cx - hw, 0);
       path.lineTo(cx + hw, 0);

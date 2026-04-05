@@ -220,6 +220,7 @@ class _VehiclesScreenState extends State<VehiclesScreen>
         vehicle: vehicle,
         db: _db,
         apiService: _apiService,
+        onVehicleUpdated: _loadVehicles,
       ),
     );
     if (result == true) _loadVehicles();
@@ -231,7 +232,12 @@ class _VehiclesScreenState extends State<VehiclesScreen>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => FuelPassSheet(vehicle: v, db: _db),
+      builder: (_) => FuelPassSheet(
+        vehicle: v,
+        db: _db,
+        apiService: _apiService,
+        onQuotaUpdated: _loadVehicles,
+      ),
     );
   }
 
@@ -1079,11 +1085,14 @@ class _VehicleFormSheet extends StatefulWidget {
   final VehicleModel? vehicle;
   final DbHelper db;
   final ApiService apiService;
+  final VoidCallback onVehicleUpdated;
+
   const _VehicleFormSheet({
     required this.user,
     required this.db,
     required this.apiService,
     this.vehicle,
+    required this.onVehicleUpdated,
   });
 
   @override
@@ -1172,6 +1181,7 @@ class _VehicleFormSheetState extends State<_VehicleFormSheet> {
     setState(() => _isLoading = false);
 
     if (result['success']) {
+      widget.onVehicleUpdated();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(_isEdit ? 'Vehicle updated!' : 'Vehicle added!'),

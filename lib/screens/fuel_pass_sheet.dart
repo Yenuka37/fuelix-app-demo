@@ -7,12 +7,21 @@ import '../models/vehicle_model.dart';
 import '../models/quota_model.dart';
 import '../database/db_helper.dart';
 import '../services/quota_service.dart';
+import '../services/api_service.dart';
 
 class FuelPassSheet extends StatefulWidget {
   final VehicleModel vehicle;
   final DbHelper db;
+  final ApiService apiService;
+  final VoidCallback onQuotaUpdated;
 
-  const FuelPassSheet({super.key, required this.vehicle, required this.db});
+  const FuelPassSheet({
+    super.key,
+    required this.vehicle,
+    required this.db,
+    required this.apiService,
+    required this.onQuotaUpdated,
+  });
 
   @override
   State<FuelPassSheet> createState() => _FuelPassSheetState();
@@ -21,7 +30,7 @@ class FuelPassSheet extends StatefulWidget {
 class _FuelPassSheetState extends State<FuelPassSheet> {
   FuelQuotaModel? _quota;
   bool _loading = true;
-  bool _isUpdating = false;
+  bool _isRefreshing = false;
 
   @override
   void initState() {
@@ -34,15 +43,110 @@ class _FuelPassSheetState extends State<FuelPassSheet> {
       setState(() => _loading = false);
       return;
     }
-    final q = await widget.db.getCurrentWeekQuota(
-      widget.vehicle.id!,
-      widget.vehicle.type,
-    );
-    if (mounted) {
-      setState(() {
-        _quota = q;
-        _loading = false;
-      });
+
+    try {
+      // Try to get quota from API first
+      final result = await widget.apiService.getCurrentQuota(
+        widget.vehicle.id!,
+        widget.vehicle.type,
+      );
+
+      if (result['success']) {
+        final data = result['data'];
+        final quota = FuelQuotaModel(
+          id: data['id'],
+          vehicleId: data['vehicleId'],
+          weekStart: DateTime.parse(data['weekStart']),
+          weekEnd: DateTime.parse(data['weekEnd']),
+          quotaLitres: (data['quotaLitres'] as num).toDouble(),
+          usedLitres: (data['usedLitres'] as num).toDouble(),
+        );
+        if (mounted) {
+          setState(() {
+            _quota = quota;
+            _loading = false;
+          });
+        }
+      } else {
+        // Fallback to local DB
+        final q = await widget.db.getCurrentWeekQuota(
+          widget.vehicle.id!,
+          widget.vehicle.type,
+        );
+        if (mounted) {
+          setState(() {
+            _quota = q;
+            _loading = false;
+          });
+        }
+      }
+    } catch (e) {
+      print('Error loading quota: $e');
+      // Fallback to local DB
+      final q = await widget.db.getCurrentWeekQuota(
+        widget.vehicle.id!,
+        widget.vehicle.type,
+      );
+      if (mounted) {
+        setState(() {
+          _quota = q;
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _refreshQuota() async {
+    setState(() => _isRefreshing = true);
+
+    try {
+      // Clear cache to get fresh data
+      QuotaService.clearCache();
+
+      final result = await widget.apiService.getCurrentQuota(
+        widget.vehicle.id!,
+        widget.vehicle.type,
+      );
+
+      if (result['success']) {
+        final data = result['data'];
+        final newQuota = FuelQuotaModel(
+          id: data['id'],
+          vehicleId: data['vehicleId'],
+          weekStart: DateTime.parse(data['weekStart']),
+          weekEnd: DateTime.parse(data['weekEnd']),
+          quotaLitres: (data['quotaLitres'] as num).toDouble(),
+          usedLitres: (data['usedLitres'] as num).toDouble(),
+        );
+
+        // Update local DB
+        await widget.db.getCurrentWeekQuota(
+          widget.vehicle.id!,
+          widget.vehicle.type,
+        );
+
+        if (mounted) {
+          setState(() {
+            _quota = newQuota;
+          });
+          // Notify parent to refresh vehicles list
+          widget.onQuotaUpdated();
+        }
+      }
+    } catch (e) {
+      print('Error refreshing quota: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to refresh quota data'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isRefreshing = false);
+      }
     }
   }
 
@@ -130,6 +234,64 @@ class _FuelPassSheetState extends State<FuelPassSheet> {
               ),
             ),
             const SizedBox(height: 20),
+
+            // Refresh Button Row
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  GestureDetector(
+                    onTap: _refreshQuota,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(20),
+                        color: AppColors.emerald.withOpacity(
+                          isDark ? 0.15 : 0.10,
+                        ),
+                        border: Border.all(
+                          color: AppColors.emerald.withOpacity(0.3),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (_isRefreshing)
+                            const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: AppColors.emerald,
+                              ),
+                            )
+                          else
+                            const Icon(
+                              Icons.refresh_rounded,
+                              size: 14,
+                              color: AppColors.emerald,
+                            ),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Refresh',
+                            style: GoogleFonts.spaceGrotesk(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.emerald,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
 
             // Fuel Pass Card
             Padding(
@@ -348,6 +510,7 @@ class _FuelPassSheetState extends State<FuelPassSheet> {
                       quota: _quota!,
                       vehicleType: widget.vehicle.type,
                       isDark: isDark,
+                      onRefresh: _refreshQuota,
                     )
                   : const SizedBox.shrink(),
             ),
@@ -456,11 +619,13 @@ class _QuotaCard extends StatefulWidget {
   final FuelQuotaModel quota;
   final String vehicleType;
   final bool isDark;
+  final VoidCallback onRefresh;
 
   const _QuotaCard({
     required this.quota,
     required this.vehicleType,
     required this.isDark,
+    required this.onRefresh,
   });
 
   @override
@@ -481,7 +646,8 @@ class _QuotaCardState extends State<_QuotaCard> {
   @override
   void didUpdateWidget(covariant _QuotaCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.quota.quotaLitres != widget.quota.quotaLitres) {
+    if (oldWidget.quota.usedLitres != widget.quota.usedLitres ||
+        oldWidget.quota.quotaLitres != widget.quota.quotaLitres) {
       setState(() {
         _quota = widget.quota;
       });
