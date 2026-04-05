@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import '../models/user_model.dart';
+import '../services/auth_service.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -16,6 +17,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   late Animation<double> _fadeAnim;
   late Animation<Offset> _slideAnim;
   UserModel? _user;
+  final _authService = AuthService();
 
   @override
   void initState() {
@@ -76,7 +78,10 @@ class _ProfileScreenState extends State<ProfileScreen>
             ),
           ),
           TextButton(
-            onPressed: () {
+            onPressed: () async {
+              // Clear saved credentials on logout
+              await _authService.logout();
+              if (!mounted) return;
               Navigator.pop(ctx);
               Navigator.pushNamedAndRemoveUntil(
                 context,

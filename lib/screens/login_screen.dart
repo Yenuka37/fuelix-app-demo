@@ -4,6 +4,7 @@ import '../theme/app_theme.dart';
 import '../database/db_helper.dart';
 import '../models/user_model.dart';
 import '../services/api_service.dart';
+import '../services/auth_service.dart';
 import '../services/tutorial_service.dart';
 import '../widgets/custom_button.dart';
 import 'onboarding_screen.dart';
@@ -23,9 +24,11 @@ class _LoginScreenState extends State<LoginScreen>
   final _passwordController = TextEditingController();
   final _db = DbHelper();
   final _apiService = ApiService();
+  final _authService = AuthService();
 
   bool _isLoading = false;
   bool _obscurePassword = true;
+  bool _rememberMe = false;
   late AnimationController _fadeController;
   late Animation<double> _fadeAnim;
   late Animation<Offset> _slideAnim;
@@ -46,6 +49,8 @@ class _LoginScreenState extends State<LoginScreen>
     Future.delayed(const Duration(milliseconds: 100), () {
       _fadeController.forward();
     });
+
+    _loadSavedCredentials();
   }
 
   @override
@@ -54,6 +59,17 @@ class _LoginScreenState extends State<LoginScreen>
     _passwordController.dispose();
     _fadeController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadSavedCredentials() async {
+    final saved = await _authService.getSavedCredentials();
+    if (saved != null && mounted) {
+      setState(() {
+        _nicController.text = saved['nic']!;
+        _passwordController.text = saved['password']!;
+        _rememberMe = true;
+      });
+    }
   }
 
   Future<void> _handleLogin() async {
@@ -71,6 +87,13 @@ class _LoginScreenState extends State<LoginScreen>
 
       if (result['success']) {
         final userData = result['data'];
+
+        // Save credentials if remember me is checked
+        await _authService.saveCredentials(
+          _nicController.text.trim().toUpperCase(),
+          _passwordController.text,
+          _rememberMe,
+        );
 
         // Create UserModel from API response
         final user = UserModel(
@@ -244,38 +267,92 @@ class _LoginScreenState extends State<LoginScreen>
                                   return null;
                                 },
                               ),
-                              const SizedBox(height: 8),
-                              // Forgot Password Link
-                              Align(
-                                alignment: Alignment.centerRight,
-                                child: TextButton(
-                                  onPressed: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) =>
-                                            const ForgotPasswordScreen(),
+                              const SizedBox(height: 12),
+                              // Remember Me & Forgot Password Row
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  // Remember Me checkbox
+                                  GestureDetector(
+                                    onTap: () {
+                                      setState(() {
+                                        _rememberMe = !_rememberMe;
+                                      });
+                                    },
+                                    child: Row(
+                                      children: [
+                                        Container(
+                                          width: 20,
+                                          height: 20,
+                                          decoration: BoxDecoration(
+                                            borderRadius: BorderRadius.circular(
+                                              5,
+                                            ),
+                                            color: _rememberMe
+                                                ? AppColors.emerald
+                                                : Colors.transparent,
+                                            border: Border.all(
+                                              color: _rememberMe
+                                                  ? AppColors.emerald
+                                                  : (isDark
+                                                        ? AppColors.darkBorder
+                                                        : AppColors
+                                                              .lightBorder),
+                                              width: 1.5,
+                                            ),
+                                          ),
+                                          child: _rememberMe
+                                              ? const Icon(
+                                                  Icons.check_rounded,
+                                                  size: 14,
+                                                  color: Colors.white,
+                                                )
+                                              : null,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          'Remember me',
+                                          style: GoogleFonts.inter(
+                                            fontSize: 13,
+                                            color: isDark
+                                                ? AppColors.darkTextSub
+                                                : AppColors.lightTextSub,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  // Forgot Password Link
+                                  TextButton(
+                                    onPressed: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) =>
+                                              const ForgotPasswordScreen(),
+                                        ),
+                                      );
+                                    },
+                                    style: TextButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 4,
                                       ),
-                                    );
-                                  },
-                                  style: TextButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 4,
+                                      minimumSize: Size.zero,
+                                      tapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
                                     ),
-                                    minimumSize: Size.zero,
-                                    tapTargetSize:
-                                        MaterialTapTargetSize.shrinkWrap,
-                                  ),
-                                  child: Text(
-                                    'Forgot Password?',
-                                    style: GoogleFonts.inter(
-                                      fontSize: 13,
-                                      color: AppColors.ocean,
-                                      fontWeight: FontWeight.w500,
+                                    child: Text(
+                                      'Forgot Password?',
+                                      style: GoogleFonts.inter(
+                                        fontSize: 13,
+                                        color: AppColors.ocean,
+                                        fontWeight: FontWeight.w500,
+                                      ),
                                     ),
                                   ),
-                                ),
+                                ],
                               ),
                               const SizedBox(height: 20),
                               GradientButton(
