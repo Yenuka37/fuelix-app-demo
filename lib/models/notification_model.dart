@@ -33,28 +33,11 @@ class NotificationModel {
     }
   }
 
-  factory NotificationModel.fromJson(Map<String, dynamic> json) {
-    // Handle isRead - could be bool, int, or String from backend
-    bool isReadValue = false;
-
-    if (json['isRead'] != null) {
-      if (json['isRead'] is bool) {
-        isReadValue = json['isRead'] as bool;
-      } else if (json['isRead'] is int) {
-        isReadValue = (json['isRead'] as int) == 1;
-      } else if (json['isRead'] is String) {
-        final str = (json['isRead'] as String).toLowerCase();
-        isReadValue = str == 'true' || str == '1';
-      } else if (json['isRead'] is num) {
-        isReadValue = (json['isRead'] as num) == 1;
-      }
-    }
-
-    print(
-      '🔍 Notification ${json['id']} - isRead raw: ${json['isRead']} (${json['isRead'].runtimeType}) -> parsed: $isReadValue',
-    );
-
-    // Parse data field - it might be a String (JSON) or already a Map
+  factory NotificationModel.fromJson(
+    Map<String, dynamic> json, {
+    bool? isReadOverride,
+  }) {
+    // Parse data field
     Map<String, dynamic>? parsedData;
 
     if (json['data'] != null) {
@@ -67,7 +50,6 @@ class NotificationModel {
             parsedData = decoded;
           }
         } catch (e) {
-          print('Error parsing data JSON: $e');
           parsedData = null;
         }
       }
@@ -79,7 +61,7 @@ class NotificationModel {
       message: json['message'] as String,
       notificationType: json['notificationType'] as String,
       createdAt: DateTime.parse(json['createdAt'] as String),
-      isRead: isReadValue,
+      isRead: isReadOverride ?? false,
       data: parsedData,
     );
   }

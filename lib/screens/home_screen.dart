@@ -7,6 +7,7 @@ import '../models/vehicle_model.dart';
 import '../models/topup_model.dart';
 import '../models/fuel_log_model.dart';
 import '../services/api_service.dart';
+import '../services/notification_local_service.dart';
 import '../services/tutorial_service.dart';
 import '../widgets/custom_button.dart';
 import '../widgets/tutorial_overlay.dart';
@@ -50,11 +51,18 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen>
-    with SingleTickerProviderStateMixin {
+class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   late AnimationController _animController;
   late Animation<double> _fadeAnim;
   late Animation<Offset> _slideAnim;
+
+  // Bell animation controllers - only created when needed
+  AnimationController? _bellController;
+  Animation<double>? _bellRotation;
+
+  // Counter animation
+  late AnimationController _counterController;
+  late Animation<double> _counterScale;
 
   UserModel? _user;
   List<VehicleModel> _vehicles = [];
@@ -67,6 +75,7 @@ class _HomeScreenState extends State<HomeScreen>
   };
   int _unreadCount = 0;
   final ApiService _apiService = ApiService();
+  final NotificationLocalService _localService = NotificationLocalService();
 
   final _keyWelcome = GlobalKey();
   final _keyVehicles = GlobalKey();
@@ -79,6 +88,8 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void initState() {
     super.initState();
+
+    // Main animation controllers
     _animController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 700),
@@ -88,9 +99,51 @@ class _HomeScreenState extends State<HomeScreen>
       begin: const Offset(0, 0.06),
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _animController, curve: Curves.easeOut));
+
+    // Counter animation (always needed)
+    _counterController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+    );
+    _counterScale = Tween<double>(begin: 0.5, end: 1.0).animate(
+      CurvedAnimation(parent: _counterController, curve: Curves.elasticOut),
+    );
+
     Future.delayed(const Duration(milliseconds: 100), () {
       if (mounted) _animController.forward();
     });
+  }
+
+  // Initialize bell animation only when there are unread notifications
+  void _initBellAnimation() {
+    if (_bellController != null) return;
+
+    _bellController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat(reverse: false);
+
+    _bellRotation =
+        TweenSequence<double>([
+          TweenSequenceItem(tween: Tween(begin: 0.0, end: 0.12), weight: 1),
+          TweenSequenceItem(tween: Tween(begin: 0.12, end: -0.12), weight: 1),
+          TweenSequenceItem(tween: Tween(begin: -0.12, end: 0.08), weight: 1),
+          TweenSequenceItem(tween: Tween(begin: 0.08, end: -0.08), weight: 1),
+          TweenSequenceItem(tween: Tween(begin: -0.08, end: 0.04), weight: 1),
+          TweenSequenceItem(tween: Tween(begin: 0.04, end: -0.04), weight: 1),
+          TweenSequenceItem(tween: Tween(begin: -0.04, end: 0.0), weight: 1),
+        ]).animate(
+          CurvedAnimation(parent: _bellController!, curve: Curves.easeInOut),
+        );
+  }
+
+  // Dispose bell animation if it exists
+  void _disposeBellAnimation() {
+    if (_bellController != null) {
+      _bellController!.dispose();
+      _bellController = null;
+      _bellRotation = null;
+    }
   }
 
   @override
@@ -107,6 +160,8 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void dispose() {
     _animController.dispose();
+    _counterController.dispose();
+    _disposeBellAnimation();
     super.dispose();
   }
 
@@ -221,9 +276,57 @@ class _HomeScreenState extends State<HomeScreen>
 
   Future<void> _loadUnreadCount() async {
     if (_user?.id == null) return;
-    final result = await _apiService.getUnreadNotificationCount(_user!.id!);
-    if (result['success'] && mounted) {
-      setState(() => _unreadCount = result['count']);
+
+    try {
+      final result = await _apiService.getUserNotifications(_user!.id!);
+
+      if (result['success'] && mounted) {
+        final List<dynamic> notificationsJson = result['data'] ?? [];
+
+        final List<int> notificationIds = [];
+        for (var json in notificationsJson) {
+          if (json is Map<String, dynamic>) {
+            notificationIds.add(json['id'] as int);
+          }
+        }
+
+        final readStatusMap = await _localService.getReadStatus(
+          notificationIds,
+        );
+
+        int unread = 0;
+        for (var json in notificationsJson) {
+          if (json is Map<String, dynamic>) {
+            final notificationId = json['id'] as int;
+            final isRead = readStatusMap[notificationId] ?? false;
+            if (!isRead) {
+              unread++;
+            }
+          }
+        }
+
+        final bool hadUnreadBefore = _unreadCount > 0;
+        final bool hasUnreadNow = unread > 0;
+
+        // Handle bell animation based on unread status
+        if (hasUnreadNow && !hadUnreadBefore) {
+          // New unread notifications appeared - start animation
+          _initBellAnimation();
+          _counterController.forward(from: 0);
+        } else if (!hasUnreadNow && hadUnreadBefore) {
+          // All notifications read - stop and dispose animation
+          _disposeBellAnimation();
+        } else if (hasUnreadNow && _bellController == null) {
+          // Still have unread but animation not running - start it
+          _initBellAnimation();
+        }
+
+        setState(() {
+          _unreadCount = unread;
+        });
+      }
+    } catch (e) {
+      print('Error loading unread count: $e');
     }
   }
 
@@ -262,7 +365,7 @@ class _HomeScreenState extends State<HomeScreen>
       ),
     );
     if (result == true) {
-      _loadUnreadCount();
+      await _loadUnreadCount();
     }
   }
 
@@ -336,6 +439,7 @@ class _HomeScreenState extends State<HomeScreen>
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final user = _user;
+    final hasUnread = _unreadCount > 0;
 
     final screen = Scaffold(
       body: Container(
@@ -359,7 +463,7 @@ class _HomeScreenState extends State<HomeScreen>
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
-                      child: _buildTopBar(isDark, user),
+                      child: _buildTopBar(isDark, user, hasUnread),
                     ),
                   ),
                   SliverToBoxAdapter(
@@ -584,9 +688,9 @@ class _HomeScreenState extends State<HomeScreen>
           targetKey: _keyNotifications,
           title: 'Notifications',
           body:
-              'Tap the bell icon to see your alerts, fuel log confirmations, top-up receipts, and quota updates.',
+              'Tap the bell icon to see your alerts. The gold bell shows unread notifications.',
           icon: Icons.notifications_rounded,
-          gradient: [AppColors.ocean, AppColors.emerald],
+          gradient: [AppColors.amber, AppColors.emerald],
           position: TooltipPosition.below,
         ),
       ],
@@ -598,7 +702,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Widget _buildTopBar(bool isDark, UserModel? user) {
+  Widget _buildTopBar(bool isDark, UserModel? user, bool hasUnread) {
     return Row(
       children: [
         Container(
@@ -634,13 +738,18 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ),
         const Spacer(),
+        // Animated Notifications Button
         KeyedSubtree(
           key: _keyNotifications,
-          child: Stack(
-            children: [
-              GestureDetector(
-                onTap: _goToNotifications,
-                child: Container(
+          child: GestureDetector(
+            onTap: _goToNotifications,
+            child: AnimatedBuilder(
+              animation: Listenable.merge([
+                if (_bellController != null) _bellController!,
+                _counterController,
+              ]),
+              builder: (context, child) {
+                return Container(
                   width: 38,
                   height: 38,
                   decoration: BoxDecoration(
@@ -654,41 +763,70 @@ class _HomeScreenState extends State<HomeScreen>
                           : AppColors.lightBorder,
                     ),
                   ),
-                  child: Icon(
-                    Icons.notifications_outlined,
-                    size: 18,
-                    color: isDark
-                        ? AppColors.darkTextSub
-                        : AppColors.lightTextSub,
+                  child: Center(
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        // Bell icon with animation (only the bell icon, not the container)
+                        if (hasUnread && _bellController != null)
+                          Transform.rotate(
+                            angle: _bellRotation?.value ?? 0,
+                            child: Icon(
+                              Icons.notifications,
+                              size: 20,
+                              color: AppColors.amber,
+                            ),
+                          )
+                        else if (hasUnread)
+                          Icon(
+                            Icons.notifications,
+                            size: 20,
+                            color: AppColors.amber,
+                          )
+                        else
+                          Icon(
+                            Icons.notifications_outlined,
+                            size: 18,
+                            color: isDark
+                                ? AppColors.darkTextSub
+                                : AppColors.lightTextSub,
+                          ),
+
+                        // Counter badge
+                        if (hasUnread)
+                          Positioned(
+                            right: -8,
+                            top: -8,
+                            child: ScaleTransition(
+                              scale: _counterScale,
+                              child: Container(
+                                padding: const EdgeInsets.all(3),
+                                decoration: const BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: AppColors.error,
+                                ),
+                                constraints: const BoxConstraints(
+                                  minWidth: 16,
+                                  minHeight: 16,
+                                ),
+                                child: Text(
+                                  _unreadCount > 9 ? '9+' : '$_unreadCount',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.white,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
-                ),
-              ),
-              if (_unreadCount > 0)
-                Positioned(
-                  right: 0,
-                  top: 0,
-                  child: Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: const BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: AppColors.error,
-                    ),
-                    constraints: const BoxConstraints(
-                      minWidth: 16,
-                      minHeight: 16,
-                    ),
-                    child: Text(
-                      '$_unreadCount',
-                      style: GoogleFonts.inter(
-                        fontSize: 9,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                ),
-            ],
+                );
+              },
+            ),
           ),
         ),
         const SizedBox(width: 10),

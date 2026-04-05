@@ -4,6 +4,7 @@ import '../theme/app_theme.dart';
 import '../models/user_model.dart';
 import '../models/notification_model.dart';
 import '../services/api_service.dart';
+import '../services/notification_local_service.dart';
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
@@ -15,6 +16,7 @@ class NotificationsScreen extends StatefulWidget {
 class _NotificationsScreenState extends State<NotificationsScreen>
     with SingleTickerProviderStateMixin {
   final ApiService _apiService = ApiService();
+  final NotificationLocalService _localService = NotificationLocalService();
   List<NotificationModel> _notifications = [];
   bool _isLoading = true;
   String? _errorMessage;
@@ -79,26 +81,34 @@ class _NotificationsScreenState extends State<NotificationsScreen>
 
       if (result['success'] && mounted) {
         final List<dynamic> notificationsJson = result['data'] ?? [];
-        final List<NotificationModel> loadedNotifications = [];
+
+        final List<int> notificationIds = [];
+        final List<Map<String, dynamic>> rawNotifications = [];
 
         for (var json in notificationsJson) {
-          try {
-            if (json is Map<String, dynamic>) {
-              loadedNotifications.add(NotificationModel.fromJson(json));
-            }
-          } catch (e) {
-            print('Error parsing notification: $e');
+          if (json is Map<String, dynamic>) {
+            notificationIds.add(json['id'] as int);
+            rawNotifications.add(json);
           }
         }
 
-        // Sort notifications: unread first (isRead = false), then read (isRead = true)
-        // Within each group, sort by date (newest first)
+        final readStatusMap = await _localService.getReadStatus(
+          notificationIds,
+        );
+
+        final List<NotificationModel> loadedNotifications = [];
+        for (var json in rawNotifications) {
+          final notificationId = json['id'] as int;
+          final isRead = readStatusMap[notificationId] ?? false;
+          loadedNotifications.add(
+            NotificationModel.fromJson(json, isReadOverride: isRead),
+          );
+        }
+
         loadedNotifications.sort((a, b) {
           if (a.isRead != b.isRead) {
-            // Unread (false) comes before read (true)
             return a.isRead ? 1 : -1;
           }
-          // Both same read status, sort by date (newest first)
           return b.createdAt.compareTo(a.createdAt);
         });
 
@@ -128,32 +138,31 @@ class _NotificationsScreenState extends State<NotificationsScreen>
     }
   }
 
-  Future<void> _markAsRead(int id) async {
+  Future<void> _markAsRead(int notificationId) async {
     if (_user?.id == null) return;
 
     try {
-      final result = await _apiService.markNotificationAsRead(id, _user!.id!);
-      if (result['success'] && mounted) {
-        await _loadNotifications();
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Notification marked as read'),
-              backgroundColor: AppColors.emerald,
-            ),
-          );
-        }
-      }
+      await _localService.markAsRead(notificationId);
+
+      setState(() {
+        _notifications = _notifications.map((n) {
+          if (n.id == notificationId) {
+            return n.copyWith(isRead: true);
+          }
+          return n;
+        }).toList();
+
+        _notifications.sort((a, b) {
+          if (a.isRead != b.isRead) {
+            return a.isRead ? 1 : -1;
+          }
+          return b.createdAt.compareTo(a.createdAt);
+        });
+      });
+
+      // Return true to indicate refresh needed when going back
     } catch (e) {
-      print('Error marking as read: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Failed to mark as read'),
-            backgroundColor: AppColors.error,
-          ),
-        );
-      }
+      print('Error marking as read locally: $e');
     }
   }
 
@@ -161,17 +170,22 @@ class _NotificationsScreenState extends State<NotificationsScreen>
     if (_user?.id == null) return;
 
     try {
-      final result = await _apiService.markAllNotificationsAsRead(_user!.id!);
-      if (result['success'] && mounted) {
-        await _loadNotifications();
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('All notifications marked as read'),
-              backgroundColor: AppColors.emerald,
-            ),
-          );
-        }
+      final allIds = _notifications.map((n) => n.id).toList();
+      await _localService.markAllAsRead(allIds);
+
+      setState(() {
+        _notifications = _notifications
+            .map((n) => n.copyWith(isRead: true))
+            .toList();
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('All notifications marked as read'),
+            backgroundColor: AppColors.emerald,
+          ),
+        );
       }
     } catch (e) {
       print('Error marking all as read: $e');
@@ -190,17 +204,16 @@ class _NotificationsScreenState extends State<NotificationsScreen>
     if (_user?.id == null) return;
 
     try {
-      final result = await _apiService.clearAllNotifications(_user!.id!);
-      if (result['success'] && mounted) {
-        await _loadNotifications();
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('All notifications cleared'),
-              backgroundColor: AppColors.emerald,
-            ),
-          );
-        }
+      await _localService.clearAllReadStatus();
+      await _loadNotifications();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('All notifications cleared'),
+            backgroundColor: AppColors.emerald,
+          ),
+        );
       }
     } catch (e) {
       print('Error clearing notifications: $e');
@@ -273,7 +286,10 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                 child: Row(
                   children: [
                     GestureDetector(
-                      onTap: () => Navigator.pop(context, true),
+                      onTap: () => Navigator.pop(
+                        context,
+                        true,
+                      ), // Return true to trigger refresh
                       child: Container(
                         width: 42,
                         height: 42,
@@ -727,7 +743,6 @@ class _NotificationDetailDialogState extends State<NotificationDetailDialog>
     );
     _animController.forward();
 
-    // Mark as read when dialog is shown (user viewed it) - ONLY if unread
     if (!widget.notification.isRead && !_isMarkedRead) {
       _isMarkedRead = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -866,22 +881,6 @@ class _NotificationDetailDialogState extends State<NotificationDetailDialog>
                         ],
                       ),
                     ),
-                    GestureDetector(
-                      onTap: () => Navigator.pop(context),
-                      child: Container(
-                        width: 36,
-                        height: 36,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(10),
-                          color: Colors.white.withOpacity(0.2),
-                        ),
-                        child: const Icon(
-                          Icons.close_rounded,
-                          size: 20,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
                   ],
                 ),
               ),
@@ -1002,63 +1001,27 @@ class _NotificationDetailDialogState extends State<NotificationDetailDialog>
                     ),
                     const SizedBox(height: 20),
 
-                    // Action buttons - Mark as Read only visible for unread notifications
-                    Row(
-                      children: [
-                        if (isUnread)
-                          Expanded(
-                            child: OutlinedButton(
-                              onPressed: () {
-                                widget.onMarkAsRead();
-                                Navigator.pop(context);
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Marked as read'),
-                                    backgroundColor: AppColors.emerald,
-                                  ),
-                                );
-                              },
-                              style: OutlinedButton.styleFrom(
-                                side: BorderSide(color: color),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 12,
-                                ),
-                              ),
-                              child: Text(
-                                'Mark as Read',
-                                style: GoogleFonts.spaceGrotesk(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: color,
-                                ),
-                              ),
-                            ),
+                    // Single Close button only
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.pop(context),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: color,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
                           ),
-                        if (isUnread) const SizedBox(width: 12),
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: () => Navigator.pop(context),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: color,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                            ),
-                            child: Text(
-                              'Close',
-                              style: GoogleFonts.spaceGrotesk(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white,
-                              ),
-                            ),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                        child: Text(
+                          'Close',
+                          style: GoogleFonts.spaceGrotesk(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
                           ),
                         ),
-                      ],
+                      ),
                     ),
                   ],
                 ),
