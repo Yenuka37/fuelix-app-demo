@@ -240,26 +240,6 @@ class _NotificationsScreenState extends State<NotificationsScreen>
     );
   }
 
-  IconData _getTypeIcon(String type, Map<String, dynamic>? data) {
-    if (data != null && data.containsKey('type')) {
-      final dataType = data['type'] as String;
-      if (dataType == 'FUEL_LOG') return Icons.local_gas_station_rounded;
-      if (dataType == 'QUOTA_UPDATE') return Icons.update_rounded;
-    }
-    return type == 'PRIVATE'
-        ? Icons.person_outline_rounded
-        : Icons.public_rounded;
-  }
-
-  Color _getTypeColor(String type, Map<String, dynamic>? data) {
-    if (data != null && data.containsKey('type')) {
-      final dataType = data['type'] as String;
-      if (dataType == 'FUEL_LOG') return AppColors.emerald;
-      if (dataType == 'QUOTA_UPDATE') return AppColors.ocean;
-    }
-    return type == 'PRIVATE' ? AppColors.amber : AppColors.ocean;
-  }
-
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -376,7 +356,6 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                 ),
               ),
               const SizedBox(height: 20),
-
               Expanded(
                 child: RefreshIndicator(
                   onRefresh: _loadNotifications,
@@ -399,12 +378,10 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                             padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
                             itemCount: _notifications.length,
                             separatorBuilder: (_, __) =>
-                                const SizedBox(height: 10),
-                            itemBuilder: (_, i) => _NotificationCard(
-                              notification: _notifications[i],
-                              isDark: isDark,
-                              onTap: () =>
-                                  _showNotificationDetail(_notifications[i]),
+                                const SizedBox(height: 12),
+                            itemBuilder: (_, i) => _buildNotificationCard(
+                              _notifications[i],
+                              isDark,
                             ),
                           ),
                   ),
@@ -412,6 +389,264 @@ class _NotificationsScreenState extends State<NotificationsScreen>
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNotificationCard(NotificationModel notification, bool isDark) {
+    final isPublic = notification.notificationType == 'PUBLIC';
+    final color = _getTypeColor(notification);
+    final icon = _getTypeIcon(notification);
+    final isUnread = !notification.isRead;
+    final hasBulkChanges =
+        notification.data?['changes'] != null &&
+        (notification.data!['changes'] as List).length > 1;
+
+    return GestureDetector(
+      onTap: () => _showNotificationDetail(notification),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          gradient: isPublic
+              ? LinearGradient(
+                  colors: isDark
+                      ? [const Color(0xFF1A1A2E), const Color(0xFF16213E)]
+                      : [const Color(0xFFF8FAFF), const Color(0xFFF0F4FF)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                )
+              : null,
+          color: isPublic
+              ? null
+              : (isDark ? AppColors.darkSurface : AppColors.lightSurface),
+          border: Border.all(
+            color: isUnread
+                ? color.withOpacity(0.5)
+                : (isDark ? AppColors.darkBorder : AppColors.lightBorder),
+            width: isUnread ? 1.5 : 1,
+          ),
+          boxShadow: isUnread
+              ? [
+                  BoxShadow(
+                    color: color.withOpacity(0.15),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ]
+              : null,
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Icon container with type-specific styling
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                gradient: isPublic
+                    ? LinearGradient(
+                        colors: [color, color.withOpacity(0.7)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      )
+                    : null,
+                color: isPublic ? null : color.withOpacity(isDark ? 0.15 : 0.1),
+              ),
+              child: Icon(
+                icon,
+                size: 24,
+                color: isPublic ? Colors.white : color,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Title row with type badge
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          notification.title,
+                          style: GoogleFonts.spaceGrotesk(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: isDark
+                                ? AppColors.darkText
+                                : AppColors.lightText,
+                          ),
+                        ),
+                      ),
+                      if (isUnread)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            color: color,
+                          ),
+                          child: Text(
+                            'NEW',
+                            style: GoogleFonts.inter(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  // Message preview
+                  Text(
+                    notification.message,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      color: isDark
+                          ? AppColors.darkTextSub
+                          : AppColors.lightTextSub,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  // Footer row with badges
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    children: [
+                      // Type badge
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(6),
+                          color: isPublic
+                              ? AppColors.ocean.withOpacity(0.15)
+                              : AppColors.amber.withOpacity(0.15),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              isPublic
+                                  ? Icons.public_rounded
+                                  : Icons.lock_rounded,
+                              size: 10,
+                              color: isPublic
+                                  ? AppColors.ocean
+                                  : AppColors.amber,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              isPublic ? 'PUBLIC' : 'PRIVATE',
+                              style: GoogleFonts.inter(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                                color: isPublic
+                                    ? AppColors.ocean
+                                    : AppColors.amber,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      // Bulk changes badge
+                      if (hasBulkChanges)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(6),
+                            color: AppColors.emerald.withOpacity(0.15),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.compare_arrows_rounded,
+                                size: 10,
+                                color: AppColors.emerald,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                '${(notification.data!['changes'] as List).length} UPDATES',
+                                style: GoogleFonts.inter(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.emerald,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      // Updated by (only for public)
+                      if (isPublic && notification.data?['updatedBy'] != null)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(6),
+                            color: AppColors.amber.withOpacity(0.15),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.admin_panel_settings_rounded,
+                                size: 10,
+                                color: AppColors.amber,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                'By: ${notification.data!['updatedBy']}',
+                                style: GoogleFonts.inter(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.amber,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  // Timestamp
+                  Text(
+                    notification.formattedDate,
+                    style: GoogleFonts.inter(
+                      fontSize: 10,
+                      color: isDark
+                          ? AppColors.darkTextMuted
+                          : AppColors.lightTextMuted,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.chevron_right_rounded,
+              size: 20,
+              color: isDark
+                  ? AppColors.darkTextMuted
+                  : AppColors.lightTextMuted,
+            ),
+          ],
         ),
       ),
     );
@@ -517,192 +752,33 @@ class _NotificationsScreenState extends State<NotificationsScreen>
       ),
     );
   }
-}
 
-class _NotificationCard extends StatelessWidget {
-  final NotificationModel notification;
-  final bool isDark;
-  final VoidCallback onTap;
-
-  const _NotificationCard({
-    required this.notification,
-    required this.isDark,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final color = _getTypeColor(
-      notification.notificationType,
-      notification.data,
-    );
-    final icon = _getTypeIcon(notification.notificationType, notification.data);
-    final isUnread = !notification.isRead;
-
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(14),
-          color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-          border: Border.all(
-            color: isUnread
-                ? color.withOpacity(0.6)
-                : (isDark ? AppColors.darkBorder : AppColors.lightBorder),
-            width: isUnread ? 1.5 : 1,
-          ),
-          boxShadow: isUnread
-              ? [
-                  BoxShadow(
-                    color: color.withOpacity(0.15),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ]
-              : null,
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                color: color.withOpacity(isDark ? 0.15 : 0.08),
-              ),
-              child: Icon(icon, size: 20, color: color),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          notification.title,
-                          style: GoogleFonts.spaceGrotesk(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            color: isDark
-                                ? AppColors.darkText
-                                : AppColors.lightText,
-                          ),
-                        ),
-                      ),
-                      if (isUnread)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(10),
-                            color: color,
-                          ),
-                          child: Text(
-                            'NEW',
-                            style: GoogleFonts.inter(
-                              fontSize: 8,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    notification.message,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.inter(
-                      fontSize: 12,
-                      color: isDark
-                          ? AppColors.darkTextSub
-                          : AppColors.lightTextSub,
-                      height: 1.4,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(4),
-                          color: notification.notificationType == 'PRIVATE'
-                              ? AppColors.amber.withOpacity(0.15)
-                              : AppColors.ocean.withOpacity(0.15),
-                        ),
-                        child: Text(
-                          notification.notificationType == 'PRIVATE'
-                              ? 'Private'
-                              : 'Public',
-                          style: GoogleFonts.inter(
-                            fontSize: 9,
-                            fontWeight: FontWeight.w600,
-                            color: notification.notificationType == 'PRIVATE'
-                                ? AppColors.amber
-                                : AppColors.ocean,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        notification.formattedDate,
-                        style: GoogleFonts.inter(
-                          fontSize: 10,
-                          color: isDark
-                              ? AppColors.darkTextMuted
-                              : AppColors.lightTextMuted,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            Icon(
-              Icons.chevron_right_rounded,
-              size: 20,
-              color: isDark
-                  ? AppColors.darkTextMuted
-                  : AppColors.lightTextMuted,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Color _getTypeColor(String type, Map<String, dynamic>? data) {
-    if (data != null && data.containsKey('type')) {
-      final dataType = data['type'] as String;
+  Color _getTypeColor(NotificationModel notification) {
+    if (notification.data != null && notification.data!.containsKey('type')) {
+      final dataType = notification.data!['type'] as String;
       if (dataType == 'FUEL_LOG') return AppColors.emerald;
       if (dataType == 'QUOTA_UPDATE') return AppColors.ocean;
+      if (dataType == 'PRICE_UPDATE') return const Color(0xFFF97316);
     }
-    return type == 'PRIVATE' ? AppColors.amber : AppColors.ocean;
+    return notification.notificationType == 'PRIVATE'
+        ? AppColors.amber
+        : AppColors.ocean;
   }
 
-  IconData _getTypeIcon(String type, Map<String, dynamic>? data) {
-    if (data != null && data.containsKey('type')) {
-      final dataType = data['type'] as String;
+  IconData _getTypeIcon(NotificationModel notification) {
+    if (notification.data != null && notification.data!.containsKey('type')) {
+      final dataType = notification.data!['type'] as String;
       if (dataType == 'FUEL_LOG') return Icons.local_gas_station_rounded;
       if (dataType == 'QUOTA_UPDATE') return Icons.update_rounded;
+      if (dataType == 'PRICE_UPDATE') return Icons.attach_money_rounded;
     }
-    return type == 'PRIVATE'
+    return notification.notificationType == 'PRIVATE'
         ? Icons.person_outline_rounded
         : Icons.public_rounded;
   }
 }
+
+// ==================== DETAIL DIALOG ====================
 
 class NotificationDetailDialog extends StatefulWidget {
   final NotificationModel notification;
@@ -752,59 +828,15 @@ class _NotificationDetailDialogState extends State<NotificationDetailDialog>
     super.dispose();
   }
 
-  Color _getTypeColor(String type, Map<String, dynamic>? data) {
-    if (data != null && data.containsKey('type')) {
-      final dataType = data['type'] as String;
-      if (dataType == 'FUEL_LOG') return AppColors.emerald;
-      if (dataType == 'QUOTA_UPDATE') return AppColors.ocean;
-    }
-    return type == 'PRIVATE' ? AppColors.amber : AppColors.ocean;
-  }
-
-  IconData _getTypeIcon(String type, Map<String, dynamic>? data) {
-    if (data != null && data.containsKey('type')) {
-      final dataType = data['type'] as String;
-      if (dataType == 'FUEL_LOG') return Icons.local_gas_station_rounded;
-      if (dataType == 'QUOTA_UPDATE') return Icons.update_rounded;
-    }
-    return type == 'PRIVATE'
-        ? Icons.person_outline_rounded
-        : Icons.public_rounded;
-  }
-
-  String _formatFullDate(DateTime date) {
-    const months = [
-      'January',
-      'February',
-      'March',
-      'April',
-      'May',
-      'June',
-      'July',
-      'August',
-      'September',
-      'October',
-      'November',
-      'December',
-    ];
-    final hour = date.hour % 12 == 0 ? 12 : date.hour % 12;
-    final minute = date.minute.toString().padLeft(2, '0');
-    final ampm = date.hour < 12 ? 'AM' : 'PM';
-    return '${months[date.month - 1]} ${date.day}, ${date.year} at $hour:$minute $ampm';
-  }
-
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final color = _getTypeColor(
-      widget.notification.notificationType,
-      widget.notification.data,
-    );
-    final icon = _getTypeIcon(
-      widget.notification.notificationType,
-      widget.notification.data,
-    );
-    final isUnread = !widget.notification.isRead;
+    final isPublic = widget.notification.notificationType == 'PUBLIC';
+    final color = _getTypeColor(widget.notification);
+    final icon = _getTypeIcon(widget.notification);
+    final hasBulkChanges =
+        widget.notification.data?['changes'] != null &&
+        (widget.notification.data!['changes'] as List).length > 1;
 
     return Dialog(
       backgroundColor: Colors.transparent,
@@ -814,7 +846,7 @@ class _NotificationDetailDialogState extends State<NotificationDetailDialog>
         child: Container(
           margin: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(24),
+            borderRadius: BorderRadius.circular(28),
             color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
             boxShadow: [
               BoxShadow(
@@ -827,26 +859,36 @@ class _NotificationDetailDialogState extends State<NotificationDetailDialog>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // Header with gradient background
               Container(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
                   borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(24),
-                    topRight: Radius.circular(24),
+                    topLeft: Radius.circular(28),
+                    topRight: Radius.circular(28),
                   ),
-                  gradient: LinearGradient(
-                    colors: [color, color.withOpacity(0.7)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
+                  gradient: isPublic
+                      ? LinearGradient(
+                          colors: [color, color.withOpacity(0.85)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        )
+                      : LinearGradient(
+                          colors: [
+                            color.withOpacity(0.85),
+                            color.withOpacity(0.7),
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
                 ),
                 child: Row(
                   children: [
                     Container(
-                      width: 50,
-                      height: 50,
+                      width: 56,
+                      height: 56,
                       decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(15),
+                        borderRadius: BorderRadius.circular(18),
                         color: Colors.white.withOpacity(0.2),
                       ),
                       child: Icon(icon, size: 28, color: Colors.white),
@@ -859,12 +901,12 @@ class _NotificationDetailDialogState extends State<NotificationDetailDialog>
                           Text(
                             widget.notification.title,
                             style: GoogleFonts.spaceGrotesk(
-                              fontSize: 18,
+                              fontSize: 20,
                               fontWeight: FontWeight.w700,
                               color: Colors.white,
                             ),
                           ),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 6),
                           Text(
                             widget.notification.formattedDate,
                             style: GoogleFonts.inter(
@@ -879,33 +921,43 @@ class _NotificationDetailDialogState extends State<NotificationDetailDialog>
                 ),
               ),
 
+              // Body
               Padding(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.all(24),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
+                    // Badges row
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
                       children: [
+                        // Type badge
                         Container(
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 4,
+                            horizontal: 12,
+                            vertical: 6,
                           ),
                           decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(12),
+                            borderRadius: BorderRadius.circular(20),
                             color: color.withOpacity(0.15),
                             border: Border.all(color: color.withOpacity(0.3)),
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(icon, size: 14, color: color),
+                              Icon(
+                                isPublic
+                                    ? Icons.public_rounded
+                                    : Icons.lock_rounded,
+                                size: 14,
+                                color: color,
+                              ),
                               const SizedBox(width: 6),
                               Text(
-                                widget.notification.notificationType ==
-                                        'PRIVATE'
-                                    ? 'PRIVATE NOTIFICATION'
-                                    : 'PUBLIC NOTIFICATION',
+                                isPublic
+                                    ? 'PUBLIC NOTIFICATION'
+                                    : 'PRIVATE NOTIFICATION',
                                 style: GoogleFonts.inter(
                                   fontSize: 10,
                                   fontWeight: FontWeight.w700,
@@ -915,33 +967,80 @@ class _NotificationDetailDialogState extends State<NotificationDetailDialog>
                             ],
                           ),
                         ),
-                        const Spacer(),
-                        if (isUnread)
+                        // Bulk changes badge
+                        if (hasBulkChanges)
                           Container(
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 3,
+                              horizontal: 12,
+                              vertical: 6,
                             ),
                             decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(10),
+                              borderRadius: BorderRadius.circular(20),
                               color: AppColors.emerald.withOpacity(0.15),
                               border: Border.all(
                                 color: AppColors.emerald.withOpacity(0.3),
                               ),
                             ),
-                            child: Text(
-                              'UNREAD',
-                              style: GoogleFonts.inter(
-                                fontSize: 9,
-                                fontWeight: FontWeight.w700,
-                                color: AppColors.emerald,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.compare_arrows_rounded,
+                                  size: 14,
+                                  color: AppColors.emerald,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  '${(widget.notification.data!['changes'] as List).length} ITEMS UPDATED',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppColors.emerald,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        // Updated by (only for public)
+                        if (isPublic &&
+                            widget.notification.data?['updatedBy'] != null)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(20),
+                              color: AppColors.amber.withOpacity(0.15),
+                              border: Border.all(
+                                color: AppColors.amber.withOpacity(0.3),
                               ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.admin_panel_settings_rounded,
+                                  size: 14,
+                                  color: AppColors.amber,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'UPDATED BY: ${widget.notification.data!['updatedBy']}',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppColors.amber,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                       ],
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 20),
 
+                    // Message
                     Text(
                       widget.notification.message,
                       style: GoogleFonts.inter(
@@ -952,8 +1051,9 @@ class _NotificationDetailDialogState extends State<NotificationDetailDialog>
                             : AppColors.lightText,
                       ),
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 24),
 
+                    // Divider
                     Container(
                       height: 1,
                       color: isDark
@@ -962,10 +1062,11 @@ class _NotificationDetailDialogState extends State<NotificationDetailDialog>
                     ),
                     const SizedBox(height: 16),
 
-                    if (widget.notification.data != null &&
-                        widget.notification.data!.containsKey('type'))
+                    // Additional info based on notification type
+                    if (widget.notification.data != null)
                       _buildAdditionalInfo(isDark, widget.notification.data!),
 
+                    // Timestamp
                     Row(
                       children: [
                         Icon(
@@ -989,6 +1090,7 @@ class _NotificationDetailDialogState extends State<NotificationDetailDialog>
                     ),
                     const SizedBox(height: 20),
 
+                    // Close button
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
@@ -996,9 +1098,9 @@ class _NotificationDetailDialogState extends State<NotificationDetailDialog>
                         style: ElevatedButton.styleFrom(
                           backgroundColor: color,
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
+                            borderRadius: BorderRadius.circular(14),
                           ),
-                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
                         ),
                         child: Text(
                           'Close',
@@ -1030,9 +1132,10 @@ class _NotificationDetailDialogState extends State<NotificationDetailDialog>
       final totalCost = data['totalCost']?.toString() ?? '0';
 
       return Container(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(16),
+        margin: const EdgeInsets.only(bottom: 16),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(16),
           color: AppColors.emerald.withOpacity(isDark ? 0.1 : 0.05),
           border: Border.all(color: AppColors.emerald.withOpacity(0.2)),
         ),
@@ -1040,14 +1143,14 @@ class _NotificationDetailDialogState extends State<NotificationDetailDialog>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Fuel Details',
+              '⛽ Fuel Details',
               style: GoogleFonts.spaceGrotesk(
-                fontSize: 12,
+                fontSize: 13,
                 fontWeight: FontWeight.w700,
                 color: AppColors.emerald,
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 12),
             _infoRow('Vehicle:', vehicleName, isDark),
             _infoRow('Fuel Grade:', fuelGrade, isDark),
             _infoRow('Litres:', '$litres L', isDark),
@@ -1060,40 +1163,216 @@ class _NotificationDetailDialogState extends State<NotificationDetailDialog>
         ),
       );
     } else if (type == 'QUOTA_UPDATE') {
-      final vehicleType = data['vehicleType'] ?? 'Unknown';
-      final oldQuota = data['oldQuota']?.toString() ?? '0';
-      final newQuota = data['newQuota']?.toString() ?? '0';
-      final updatedBy = data['updatedBy'] ?? 'Admin';
+      final changes = data['changes'] as List?;
+      final changeCount = changes?.length ?? 1;
       final effectiveDate = data['effectiveDate'] ?? 'Next Monday';
+      final updatedBy = data['updatedBy'] ?? 'Administrator';
+      final isBulk = changeCount > 1;
 
       return Container(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(16),
+        margin: const EdgeInsets.only(bottom: 16),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(16),
           color: AppColors.ocean.withOpacity(isDark ? 0.1 : 0.05),
           border: Border.all(color: AppColors.ocean.withOpacity(0.2)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Quota Update Details',
-              style: GoogleFonts.spaceGrotesk(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: AppColors.ocean,
+            Row(
+              children: [
+                Icon(
+                  isBulk ? Icons.compare_arrows_rounded : Icons.update_rounded,
+                  size: 18,
+                  color: AppColors.ocean,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  isBulk ? '📊 Bulk Quota Update' : '📊 Quota Update Details',
+                  style: GoogleFonts.spaceGrotesk(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.ocean,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            if (isBulk && changes != null)
+              ...changes
+                  .map(
+                    (change) => Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: _infoRow(
+                        change['vehicleType'] ?? 'Unknown',
+                        '${(change['oldQuota'] as num?)?.toDouble() ?? 0}L → ${(change['newQuota'] as num?)?.toDouble() ?? 0}L',
+                        isDark,
+                        isBulk: true,
+                      ),
+                    ),
+                  )
+                  .toList()
+            else
+              Column(
+                children: [
+                  _infoRow(
+                    'Vehicle Type:',
+                    data['vehicleType'] ?? 'Unknown',
+                    isDark,
+                  ),
+                  _infoRow(
+                    'Old Quota:',
+                    '${(data['oldQuota'] as num?)?.toDouble() ?? 0} L',
+                    isDark,
+                  ),
+                  _infoRow(
+                    'New Quota:',
+                    '${(data['newQuota'] as num?)?.toDouble() ?? 0} L',
+                    isDark,
+                  ),
+                ],
               ),
-            ),
+
             const SizedBox(height: 8),
-            _infoRow('Vehicle Type:', vehicleType, isDark),
-            _infoRow('Old Quota:', '$oldQuota L', isDark),
-            _infoRow(
-              'New Quota:',
-              '$newQuota L (effective next Monday)',
-              isDark,
-            ),
-            _infoRow('Updated By:', updatedBy, isDark),
             _infoRow('Effective Date:', effectiveDate, isDark),
+            _infoRow('Updated By:', updatedBy, isDark),
+
+            if (isBulk)
+              Container(
+                margin: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  color: AppColors.emerald.withOpacity(0.1),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.info_outline,
+                      size: 12,
+                      color: AppColors.emerald,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        '$changeCount vehicle types updated in this notification',
+                        style: GoogleFonts.inter(
+                          fontSize: 10,
+                          color: AppColors.emerald,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      );
+    } else if (type == 'PRICE_UPDATE') {
+      final changes = data['changes'] as List?;
+      final changeCount = changes?.length ?? 1;
+      final updatedBy = data['updatedBy'] ?? 'Administrator';
+      final isBulk = changeCount > 1;
+
+      return Container(
+        padding: const EdgeInsets.all(16),
+        margin: const EdgeInsets.only(bottom: 16),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          color: const Color(0xFFF97316).withOpacity(isDark ? 0.1 : 0.05),
+          border: Border.all(color: const Color(0xFFF97316).withOpacity(0.2)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.attach_money_rounded,
+                  size: 18,
+                  color: const Color(0xFFF97316),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  isBulk ? '💰 Bulk Price Update' : '💰 Price Update Details',
+                  style: GoogleFonts.spaceGrotesk(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: const Color(0xFFF97316),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            if (isBulk && changes != null)
+              ...changes
+                  .map(
+                    (change) => Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: _infoRow(
+                        change['fuelGrade'] ?? 'Unknown',
+                        'LKR ${(change['oldPrice'] as num?)?.toDouble() ?? 0} → LKR ${(change['newPrice'] as num?)?.toDouble() ?? 0}',
+                        isDark,
+                        isBulk: true,
+                      ),
+                    ),
+                  )
+                  .toList()
+            else
+              Column(
+                children: [
+                  _infoRow(
+                    'Fuel Grade:',
+                    data['fuelGrade'] ?? 'Unknown',
+                    isDark,
+                  ),
+                  _infoRow(
+                    'Old Price:',
+                    'LKR ${(data['oldPrice'] as num?)?.toDouble() ?? 0}',
+                    isDark,
+                  ),
+                  _infoRow(
+                    'New Price:',
+                    'LKR ${(data['newPrice'] as num?)?.toDouble() ?? 0}',
+                    isDark,
+                  ),
+                ],
+              ),
+
+            const SizedBox(height: 8),
+            _infoRow('Updated By:', updatedBy, isDark),
+
+            if (isBulk)
+              Container(
+                margin: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  color: AppColors.emerald.withOpacity(0.1),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.info_outline,
+                      size: 12,
+                      color: AppColors.emerald,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        '$changeCount fuel grades updated in this notification',
+                        style: GoogleFonts.inter(
+                          fontSize: 10,
+                          color: AppColors.emerald,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
           ],
         ),
       );
@@ -1102,14 +1381,19 @@ class _NotificationDetailDialogState extends State<NotificationDetailDialog>
     return const SizedBox.shrink();
   }
 
-  Widget _infoRow(String label, String value, bool isDark) {
+  Widget _infoRow(
+    String label,
+    String value,
+    bool isDark, {
+    bool isBulk = false,
+  }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: 100,
+            width: isBulk ? 100 : 90,
             child: Text(
               label,
               style: GoogleFonts.inter(
@@ -1124,6 +1408,7 @@ class _NotificationDetailDialogState extends State<NotificationDetailDialog>
               value,
               style: GoogleFonts.inter(
                 fontSize: 12,
+                fontWeight: FontWeight.w500,
                 color: isDark ? AppColors.darkText : AppColors.lightText,
               ),
             ),
@@ -1131,5 +1416,50 @@ class _NotificationDetailDialogState extends State<NotificationDetailDialog>
         ],
       ),
     );
+  }
+
+  String _formatFullDate(DateTime date) {
+    const months = [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
+    final hour = date.hour % 12 == 0 ? 12 : date.hour % 12;
+    final minute = date.minute.toString().padLeft(2, '0');
+    final ampm = date.hour < 12 ? 'AM' : 'PM';
+    return '${months[date.month - 1]} ${date.day}, ${date.year} at $hour:$minute $ampm';
+  }
+
+  Color _getTypeColor(NotificationModel notification) {
+    if (notification.data != null && notification.data!.containsKey('type')) {
+      final dataType = notification.data!['type'] as String;
+      if (dataType == 'FUEL_LOG') return AppColors.emerald;
+      if (dataType == 'QUOTA_UPDATE') return AppColors.ocean;
+      if (dataType == 'PRICE_UPDATE') return const Color(0xFFF97316);
+    }
+    return notification.notificationType == 'PRIVATE'
+        ? AppColors.amber
+        : AppColors.ocean;
+  }
+
+  IconData _getTypeIcon(NotificationModel notification) {
+    if (notification.data != null && notification.data!.containsKey('type')) {
+      final dataType = notification.data!['type'] as String;
+      if (dataType == 'FUEL_LOG') return Icons.local_gas_station_rounded;
+      if (dataType == 'QUOTA_UPDATE') return Icons.update_rounded;
+      if (dataType == 'PRICE_UPDATE') return Icons.attach_money_rounded;
+    }
+    return notification.notificationType == 'PRIVATE'
+        ? Icons.person_outline_rounded
+        : Icons.public_rounded;
   }
 }

@@ -359,6 +359,7 @@ class DbHelper {
     )).isNotEmpty;
   }
 
+  // Stores the DECRYPTED Fuel Pass Code (from backend)
   Future<bool> setFuelPassCode(
     int vehicleId,
     String code,
@@ -401,7 +402,6 @@ class DbHelper {
     if (rows.isNotEmpty) {
       final existing = FuelQuotaModel.fromMap(rows.first);
       if (QuotaService.isCurrentWeek(existing, now)) {
-        // Check if quota needs update (admin might have changed limits)
         final currentLimit = await QuotaService.getQuotaForVehicleType(
           vehicleType,
         );
@@ -530,7 +530,7 @@ class DbHelper {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // FUEL LOGS — atomic save (quota deduction + wallet deduction) with dynamic quota
+  // FUEL LOGS
   // ══════════════════════════════════════════════════════════════════════════
 
   Future<int> saveFuelLog(FuelLogModel log, String vehicleType) async {
@@ -538,7 +538,6 @@ class DbHelper {
     int resultId = -3;
 
     await db.transaction((txn) async {
-      // ── 1. Get or create current-week quota with dynamic limit ───────────
       final quotaRows = await txn.query(
         _quotasTable,
         where: 'vehicle_id = ?',
@@ -555,7 +554,6 @@ class DbHelper {
       if (quotaRows.isNotEmpty) {
         final existing = FuelQuotaModel.fromMap(quotaRows.first);
         if (QuotaService.isCurrentWeek(existing, DateTime.now())) {
-          // Update quota if limit has changed
           if (existing.quotaLitres != currentLimit) {
             quota = existing.copyWith(quotaLitres: currentLimit);
             await txn.update(
@@ -596,13 +594,11 @@ class DbHelper {
         quota = fresh.copyWith(id: newId);
       }
 
-      // ── 2. Validate litre limit ────────────────────────────────────────────
       if (log.litres > quota.remainingLitres + 0.001) {
         resultId = -1;
         return;
       }
 
-      // ── 3. Validate wallet balance ─────────────────────────────────────────
       final walletRows = await txn.query(
         _walletTable,
         where: 'user_id = ?',
@@ -618,7 +614,6 @@ class DbHelper {
         return;
       }
 
-      // ── 4. Deduct from quota ───────────────────────────────────────────────
       await txn.update(
         _quotasTable,
         {'used_litres': quota.usedLitres + log.litres},
@@ -626,7 +621,6 @@ class DbHelper {
         whereArgs: [quota.id],
       );
 
-      // ── 5. Deduct from wallet ──────────────────────────────────────────────
       final newBalance = currentBalance - log.totalCost;
       final now = DateTime.now().toIso8601String();
       if (walletRows.isEmpty) {
@@ -644,7 +638,6 @@ class DbHelper {
         );
       }
 
-      // ── 6. Insert fuel log ─────────────────────────────────────────────────
       resultId = await txn.insert(_fuelLogsTable, log.toMap()..remove('id'));
     });
 
@@ -707,7 +700,6 @@ class DbHelper {
     };
   }
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
   String _generateRef() {
     final now = DateTime.now();
     return 'FX${now.millisecondsSinceEpoch.toRadixString(36).toUpperCase()}';

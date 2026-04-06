@@ -1,16 +1,19 @@
+// File: lib/models/vehicle_model.dart
+
 class VehicleModel {
   final int? id;
   final int userId;
-  final String type; // Car, Motorcycle, Van, Truck, Bus, Three-Wheeler
+  final String type;
   final String make;
   final String model;
   final String year;
   final String registrationNo;
-  final String fuelType; // Petrol, Diesel, Electric, Hybrid, LPG
+  final String fuelType;
   final String engineCC;
   final String color;
-  final String? fuelPassCode; // 8-char unique code — null until generated
-  final DateTime? qrGeneratedAt; // timestamp of QR generation
+  final String?
+  fuelPassCode; // This will contain the DECRYPTED code from backend
+  final DateTime? qrGeneratedAt;
   final DateTime? createdAt;
 
   VehicleModel({
@@ -29,10 +32,8 @@ class VehicleModel {
     this.createdAt,
   });
 
-  /// Whether a Fuel Pass QR has been generated for this vehicle.
   bool get hasQr => fuelPassCode != null && fuelPassCode!.isNotEmpty;
 
-  /// Vehicle is locked (uneditable) once QR is generated.
   bool get isLocked => hasQr;
 
   Map<String, dynamic> toMap() => {
@@ -46,7 +47,7 @@ class VehicleModel {
     'fuel_type': fuelType,
     'engine_cc': engineCC,
     'color': color,
-    'fuel_pass_code': fuelPassCode,
+    'fuel_pass_code': fuelPassCode, // Store decrypted code locally
     'qr_generated_at': qrGeneratedAt?.toIso8601String(),
     'created_at':
         createdAt?.toIso8601String() ?? DateTime.now().toIso8601String(),

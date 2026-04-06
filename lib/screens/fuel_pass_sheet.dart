@@ -1,3 +1,5 @@
+// File: lib/screens/fuel_pass_sheet.dart
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -45,7 +47,6 @@ class _FuelPassSheetState extends State<FuelPassSheet> {
     }
 
     try {
-      // Try to get quota from API first
       final result = await widget.apiService.getCurrentQuota(
         widget.vehicle.id!,
         widget.vehicle.type,
@@ -68,7 +69,6 @@ class _FuelPassSheetState extends State<FuelPassSheet> {
           });
         }
       } else {
-        // Fallback to local DB
         final q = await widget.db.getCurrentWeekQuota(
           widget.vehicle.id!,
           widget.vehicle.type,
@@ -82,7 +82,6 @@ class _FuelPassSheetState extends State<FuelPassSheet> {
       }
     } catch (e) {
       print('Error loading quota: $e');
-      // Fallback to local DB
       final q = await widget.db.getCurrentWeekQuota(
         widget.vehicle.id!,
         widget.vehicle.type,
@@ -100,7 +99,6 @@ class _FuelPassSheetState extends State<FuelPassSheet> {
     setState(() => _isRefreshing = true);
 
     try {
-      // Clear cache to get fresh data
       QuotaService.clearCache();
 
       final result = await widget.apiService.getCurrentQuota(
@@ -119,7 +117,6 @@ class _FuelPassSheetState extends State<FuelPassSheet> {
           usedLitres: (data['usedLitres'] as num).toDouble(),
         );
 
-        // Update local DB
         await widget.db.getCurrentWeekQuota(
           widget.vehicle.id!,
           widget.vehicle.type,
@@ -129,7 +126,6 @@ class _FuelPassSheetState extends State<FuelPassSheet> {
           setState(() {
             _quota = newQuota;
           });
-          // Notify parent to refresh vehicles list
           widget.onQuotaUpdated();
         }
       }
@@ -210,7 +206,11 @@ class _FuelPassSheetState extends State<FuelPassSheet> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final accent = vehicleTypeColor(widget.vehicle.type);
+
+    // Get the decrypted Fuel Pass Code from the vehicle model
     final code = widget.vehicle.fuelPassCode ?? '';
+
+    // QR data uses the decrypted code
     final qrData =
         'FUELIX|${widget.vehicle.fuelPassCode}|${widget.vehicle.registrationNo}|'
         '${widget.vehicle.make} ${widget.vehicle.model}|${widget.vehicle.year}|${widget.vehicle.fuelType}';
@@ -235,7 +235,6 @@ class _FuelPassSheetState extends State<FuelPassSheet> {
             ),
             const SizedBox(height: 20),
 
-            // Refresh Button Row
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: Row(
@@ -293,7 +292,6 @@ class _FuelPassSheetState extends State<FuelPassSheet> {
             ),
             const SizedBox(height: 8),
 
-            // Fuel Pass Card
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: Container(
@@ -384,7 +382,6 @@ class _FuelPassSheetState extends State<FuelPassSheet> {
                       ),
                     ),
 
-                    // QR Code
                     Container(
                       margin: const EdgeInsets.symmetric(horizontal: 22),
                       padding: const EdgeInsets.all(20),
@@ -457,7 +454,6 @@ class _FuelPassSheetState extends State<FuelPassSheet> {
                       ),
                     ),
 
-                    // Vehicle Details
                     Padding(
                       padding: const EdgeInsets.fromLTRB(22, 16, 22, 22),
                       child: Row(
@@ -492,7 +488,6 @@ class _FuelPassSheetState extends State<FuelPassSheet> {
 
             const SizedBox(height: 20),
 
-            // Quota Card
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: _loading
@@ -517,7 +512,6 @@ class _FuelPassSheetState extends State<FuelPassSheet> {
 
             const SizedBox(height: 16),
 
-            // Notice 1
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: _Notice(
@@ -531,7 +525,6 @@ class _FuelPassSheetState extends State<FuelPassSheet> {
 
             const SizedBox(height: 12),
 
-            // Notice 2
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 0, 24, 36),
               child: _Notice(
@@ -813,7 +806,6 @@ class _QuotaCardState extends State<_QuotaCard> {
             ],
           ),
           const SizedBox(height: 18),
-
           Row(
             children: [
               _QuotaStat(
@@ -840,7 +832,6 @@ class _QuotaCardState extends State<_QuotaCard> {
             ],
           ),
           const SizedBox(height: 16),
-
           Row(
             children: [
               Expanded(
@@ -887,7 +878,6 @@ class _QuotaCardState extends State<_QuotaCard> {
               ),
             ],
           ),
-
           if (exhausted) ...[
             const SizedBox(height: 14),
             Container(

@@ -146,7 +146,7 @@ class _VehiclesScreenState extends State<VehiclesScreen>
               fuelType: json['fuelType'],
               engineCC: json['engineCC'] ?? '',
               color: json['color'] ?? '',
-              fuelPassCode: json['fuelPassCode'],
+              fuelPassCode: json['fuelPassCode'], // Decrypted code from backend
               qrGeneratedAt: json['qrGeneratedAt'] != null
                   ? DateTime.tryParse(json['qrGeneratedAt'])
                   : null,
@@ -711,7 +711,11 @@ class _VehicleCard extends StatelessWidget {
                             if (locked) ...[
                               const SizedBox(width: 6),
                               _Tag(
-                                label: 'FUEL PASS',
+                                label:
+                                    vehicle.fuelPassCode != null &&
+                                        vehicle.fuelPassCode!.length >= 4
+                                    ? vehicle.fuelPassCode!.substring(0, 4)
+                                    : 'PASS',
                                 color: AppColors.emerald,
                                 isDark: isDark,
                                 icon: Icons.qr_code_rounded,
@@ -1100,8 +1104,7 @@ class _VehicleFormSheetState extends State<_VehicleFormSheet> {
   bool _isLoadingModels = false;
   bool _isSaving = false;
 
-  // Step tracking for field enable/disable
-  int _currentStep = 0; // 0=type, 1=brand, 2=model, 3=details
+  int _currentStep = 0;
   bool _showModelsField = false;
   String? _noModelsMessage;
 
@@ -1340,7 +1343,6 @@ class _VehicleFormSheetState extends State<_VehicleFormSheet> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final mq = MediaQuery.of(context);
 
-    // Determine which fields are enabled
     bool isTypeEnabled = !_isEdit;
     bool isBrandEnabled = _type != null && !_isEdit && _brands.isNotEmpty;
     bool isModelEnabled =
@@ -1431,7 +1433,6 @@ class _VehicleFormSheetState extends State<_VehicleFormSheet> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Step 1: Vehicle Type
                     _Label('Step 1: Vehicle Type', isDark),
                     _Dropdown(
                       label: 'Select Vehicle Type',
@@ -1446,7 +1447,6 @@ class _VehicleFormSheetState extends State<_VehicleFormSheet> {
                     ),
                     const SizedBox(height: 16),
 
-                    // Step 2: Brand
                     _Label('Step 2: Brand', isDark),
                     _isLoadingBrands && _type != null
                         ? const Padding(
@@ -1474,7 +1474,6 @@ class _VehicleFormSheetState extends State<_VehicleFormSheet> {
                           ),
                     const SizedBox(height: 16),
 
-                    // Step 3: Model (Conditionally Visible)
                     if (_showModelsField) ...[
                       _Label('Step 3: Model', isDark),
                       _isLoadingModels
@@ -1543,7 +1542,6 @@ class _VehicleFormSheetState extends State<_VehicleFormSheet> {
                       const SizedBox(height: 16),
                     ],
 
-                    // Step 4: Year (Only enabled after model is selected)
                     _Label('Step 4: Year', isDark),
                     AppTextField(
                       label: 'Year',
@@ -1569,7 +1567,6 @@ class _VehicleFormSheetState extends State<_VehicleFormSheet> {
                     ),
                     const SizedBox(height: 16),
 
-                    // Step 5: Registration Number (Only enabled after model is selected)
                     _Label('Step 5: Registration Number', isDark),
                     Row(
                       children: [
@@ -1626,7 +1623,6 @@ class _VehicleFormSheetState extends State<_VehicleFormSheet> {
                     ),
                     const SizedBox(height: 16),
 
-                    // Step 6: Fuel Type (Only enabled after model is selected)
                     _Label('Step 6: Fuel Type', isDark),
                     _FuelPills(
                       selected: _fuelType,
@@ -1647,7 +1643,6 @@ class _VehicleFormSheetState extends State<_VehicleFormSheet> {
                       ),
                     const SizedBox(height: 16),
 
-                    // Step 7: Additional Details (Only enabled after model is selected)
                     _Label('Step 7: Additional Details (Optional)', isDark),
                     Row(
                       children: [
@@ -1680,7 +1675,6 @@ class _VehicleFormSheetState extends State<_VehicleFormSheet> {
                     ),
                     const SizedBox(height: 28),
 
-                    // Save Button (Only enabled when all required steps are complete)
                     GradientButton(
                       label: _isEdit ? 'Update Vehicle' : 'Add to Garage',
                       onPressed:
