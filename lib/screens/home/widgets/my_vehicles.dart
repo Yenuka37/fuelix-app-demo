@@ -282,6 +282,7 @@ class _EmptyGarage extends StatelessWidget {
     return GestureDetector(
       onTap: onAdd,
       child: Container(
+        width: double.infinity,
         padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 20),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),

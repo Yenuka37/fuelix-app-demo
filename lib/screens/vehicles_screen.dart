@@ -14,7 +14,6 @@ import '../widgets/custom_button.dart';
 import '../widgets/tutorial_overlay.dart';
 import 'fuel_pass_sheet.dart';
 
-// ─── Static data ──────────────────────────────────────────────────────────────
 const _kVehicleTypes = [
   'Car',
   'Motorcycle',
@@ -24,29 +23,7 @@ const _kVehicleTypes = [
   'Three-Wheeler',
 ];
 const _kFuelTypes = ['Petrol', 'Diesel', 'Electric', 'Hybrid', 'LPG'];
-const _kMakes = [
-  'Toyota',
-  'Honda',
-  'Suzuki',
-  'Nissan',
-  'Mitsubishi',
-  'Mazda',
-  'Hyundai',
-  'Kia',
-  'BMW',
-  'Mercedes-Benz',
-  'Volkswagen',
-  'Ford',
-  'Bajaj',
-  'TVS',
-  'Hero',
-  'Yamaha',
-  'Kawasaki',
-  'Tata',
-  'Other',
-];
 
-// ── Colour / icon helpers ─────────────────────────────────────────────
 Color vehicleTypeColor(String type) {
   switch (type) {
     case 'Car':
@@ -85,11 +62,9 @@ IconData vehicleTypeIcon(String type) {
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// VehiclesScreen
-// ═════════════════════════════════════════════════════════════════════════════
 class VehiclesScreen extends StatefulWidget {
   const VehiclesScreen({super.key});
+
   @override
   State<VehiclesScreen> createState() => _VehiclesScreenState();
 }
@@ -101,8 +76,8 @@ class _VehiclesScreenState extends State<VehiclesScreen>
   UserModel? _user;
   List<VehicleModel> _vehicles = [];
   bool _loading = true;
+  bool _isRefreshing = false;
 
-  // ── Tutorial ──────────────────────────────────────────────────────────────
   final _keyAddBtn = GlobalKey();
   final _keyVehicleCard = GlobalKey();
   final _keyFuelPass = GlobalKey();
@@ -205,7 +180,13 @@ class _VehiclesScreenState extends State<VehiclesScreen>
     _animCtrl.forward(from: 0);
   }
 
-  // ── Add / Edit form ───────────────────────────────────────────────────────
+  Future<void> _refreshVehicles() async {
+    if (_isRefreshing) return;
+    setState(() => _isRefreshing = true);
+    await _loadVehicles();
+    setState(() => _isRefreshing = false);
+  }
+
   Future<void> _openForm({VehicleModel? vehicle}) async {
     if (vehicle?.isLocked == true) {
       _showFuelPass(vehicle!);
@@ -220,13 +201,15 @@ class _VehiclesScreenState extends State<VehiclesScreen>
         vehicle: vehicle,
         db: _db,
         apiService: _apiService,
-        onVehicleUpdated: _loadVehicles,
+        onVehicleUpdated: _refreshVehicles,
       ),
     );
-    if (result == true) _loadVehicles();
+    if (result == true) {
+      await _refreshVehicles();
+      if (mounted) Navigator.pop(context, true);
+    }
   }
 
-  // ── Fuel Pass QR dialog ───────────────────────────────────────────────────
   void _showFuelPass(VehicleModel v) {
     showModalBottomSheet(
       context: context,
@@ -236,12 +219,11 @@ class _VehiclesScreenState extends State<VehiclesScreen>
         vehicle: v,
         db: _db,
         apiService: _apiService,
-        onQuotaUpdated: _loadVehicles,
+        onQuotaUpdated: _refreshVehicles,
       ),
     );
   }
 
-  // ── Generate QR confirm ───────────────────────────────────────────────────
   Future<void> _confirmGenerateQr(VehicleModel v) async {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final ok = await showDialog<bool>(
@@ -341,9 +323,10 @@ class _VehiclesScreenState extends State<VehiclesScreen>
     if (!mounted) return;
 
     if (result['success']) {
-      await _loadVehicles();
+      await _refreshVehicles();
       final updated = _vehicles.firstWhere((x) => x.id == v.id);
       _showFuelPass(updated);
+      if (mounted) Navigator.pop(context, true);
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -354,7 +337,6 @@ class _VehiclesScreenState extends State<VehiclesScreen>
     }
   }
 
-  // ── Delete ────────────────────────────────────────────────────────────────
   Future<void> _confirmDelete(VehicleModel v) async {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final ok = await showDialog<bool>(
@@ -369,7 +351,8 @@ class _VehiclesScreenState extends State<VehiclesScreen>
           style: Theme.of(context).textTheme.headlineSmall,
         ),
         content: Text(
-          'Remove ${v.displayName} (${v.registrationNo}) from your garage?',
+          'Remove ${v.displayName} (${v.registrationNo}) from your garage?\n\nThis will also delete all fuel logs associated with this vehicle.',
+          style: Theme.of(context).textTheme.bodyMedium,
         ),
         actions: [
           TextButton(
@@ -391,7 +374,8 @@ class _VehiclesScreenState extends State<VehiclesScreen>
       final result = await _apiService.deleteVehicle(v.id!);
       if (result['success']) {
         await _db.deleteVehicle(v.id!);
-        await _loadVehicles();
+        await _refreshVehicles();
+        if (mounted) Navigator.pop(context, true);
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -404,7 +388,6 @@ class _VehiclesScreenState extends State<VehiclesScreen>
     }
   }
 
-  // ── Build ─────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -421,108 +404,113 @@ class _VehiclesScreenState extends State<VehiclesScreen>
           ),
         ),
         child: SafeArea(
-          child: Column(
-            children: [
-              // Top bar
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-                child: Row(
-                  children: [
-                    GestureDetector(
-                      onTap: () => Navigator.pop(context),
-                      child: _iconBtn(Icons.arrow_back_ios_new_rounded, isDark),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Text(
-                        'My Vehicles',
-                        style: Theme.of(context).textTheme.headlineMedium,
+          child: RefreshIndicator(
+            onRefresh: _refreshVehicles,
+            color: AppColors.emerald,
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                  child: Row(
+                    children: [
+                      GestureDetector(
+                        onTap: () => Navigator.pop(context, false),
+                        child: _iconBtn(
+                          Icons.arrow_back_ios_new_rounded,
+                          isDark,
+                        ),
                       ),
-                    ),
-                    KeyedSubtree(
-                      key: _keyAddBtn,
-                      child: GestureDetector(
-                        onTap: _user != null ? () => _openForm() : null,
-                        child: Container(
-                          height: 42,
-                          padding: const EdgeInsets.symmetric(horizontal: 14),
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(12),
-                            gradient: const LinearGradient(
-                              colors: [AppColors.emerald, AppColors.ocean],
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Text(
+                          'My Vehicles',
+                          style: Theme.of(context).textTheme.headlineMedium,
+                        ),
+                      ),
+                      KeyedSubtree(
+                        key: _keyAddBtn,
+                        child: GestureDetector(
+                          onTap: _user != null ? () => _openForm() : null,
+                          child: Container(
+                            height: 42,
+                            padding: const EdgeInsets.symmetric(horizontal: 14),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(12),
+                              gradient: const LinearGradient(
+                                colors: [AppColors.emerald, AppColors.ocean],
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: AppColors.emerald.withOpacity(0.3),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 4),
+                                ),
+                              ],
                             ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: AppColors.emerald.withOpacity(0.3),
-                                blurRadius: 10,
-                                offset: const Offset(0, 4),
-                              ),
-                            ],
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(
-                                Icons.add_rounded,
-                                size: 18,
-                                color: Colors.white,
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                'Add',
-                                style: GoogleFonts.spaceGrotesk(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w700,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.add_rounded,
+                                  size: 18,
                                   color: Colors.white,
                                 ),
-                              ),
-                            ],
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Add',
+                                  style: GoogleFonts.spaceGrotesk(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(height: 20),
-              // List
-              Expanded(
-                child: _loading
-                    ? const Center(
-                        child: CircularProgressIndicator(
-                          color: AppColors.emerald,
-                          strokeWidth: 2,
-                        ),
-                      )
-                    : _vehicles.isEmpty
-                    ? _EmptyGarage(
-                        isDark: isDark,
-                        onAdd: () => _openForm(),
-                        tutorialKey: _keyVehicleCard,
-                      )
-                    : FadeTransition(
-                        opacity: _fadeAnim,
-                        child: ListView.separated(
-                          physics: const BouncingScrollPhysics(),
-                          padding: const EdgeInsets.fromLTRB(24, 4, 24, 32),
-                          itemCount: _vehicles.length,
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(height: 12),
-                          itemBuilder: (_, i) => _VehicleCard(
-                            vehicle: _vehicles[i],
-                            isDark: isDark,
-                            onEdit: () => _openForm(vehicle: _vehicles[i]),
-                            onDelete: () => _confirmDelete(_vehicles[i]),
-                            onGenerateQr: () =>
-                                _confirmGenerateQr(_vehicles[i]),
-                            onViewFuelPass: () => _showFuelPass(_vehicles[i]),
-                            cardKey: i == 0 ? _keyVehicleCard : null,
-                            fuelPassKey: i == 0 ? _keyFuelPass : null,
+                const SizedBox(height: 20),
+                Expanded(
+                  child: _loading
+                      ? const Center(
+                          child: CircularProgressIndicator(
+                            color: AppColors.emerald,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : _vehicles.isEmpty
+                      ? _EmptyGarage(
+                          isDark: isDark,
+                          onAdd: () => _openForm(),
+                          tutorialKey: _keyVehicleCard,
+                        )
+                      : FadeTransition(
+                          opacity: _fadeAnim,
+                          child: ListView.separated(
+                            physics: const BouncingScrollPhysics(),
+                            padding: const EdgeInsets.fromLTRB(24, 4, 24, 32),
+                            itemCount: _vehicles.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: 12),
+                            itemBuilder: (_, i) => _VehicleCard(
+                              vehicle: _vehicles[i],
+                              isDark: isDark,
+                              onEdit: () => _openForm(vehicle: _vehicles[i]),
+                              onDelete: () => _confirmDelete(_vehicles[i]),
+                              onGenerateQr: () =>
+                                  _confirmGenerateQr(_vehicles[i]),
+                              onViewFuelPass: () => _showFuelPass(_vehicles[i]),
+                              cardKey: i == 0 ? _keyVehicleCard : null,
+                              fuelPassKey: i == 0 ? _keyFuelPass : null,
+                            ),
                           ),
                         ),
-                      ),
-              ),
-            ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -590,9 +578,6 @@ class _VehiclesScreenState extends State<VehiclesScreen>
   );
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// Vehicle Card
-// ═════════════════════════════════════════════════════════════════════════════
 class _VehicleCard extends StatelessWidget {
   final VehicleModel vehicle;
   final bool isDark;
@@ -1077,9 +1062,6 @@ class _EmptyGarage extends StatelessWidget {
   );
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// Add / Edit Form Sheet
-// ═════════════════════════════════════════════════════════════════════════════
 class _VehicleFormSheet extends StatefulWidget {
   final UserModel user;
   final VehicleModel? vehicle;
@@ -1101,16 +1083,27 @@ class _VehicleFormSheet extends StatefulWidget {
 
 class _VehicleFormSheetState extends State<_VehicleFormSheet> {
   final _formKey = GlobalKey<FormState>();
-  final _makeCtrl = TextEditingController();
+  final _regPrefixCtrl = TextEditingController();
+  final _regNumberCtrl = TextEditingController();
   final _modelCtrl = TextEditingController();
   final _yearCtrl = TextEditingController();
-  final _regCtrl = TextEditingController();
   final _engCtrl = TextEditingController();
   final _colorCtrl = TextEditingController();
 
   String? _type;
   String? _fuelType;
-  bool _isLoading = false;
+  String? _selectedBrand;
+  int? _selectedBrandId;
+  List<dynamic> _brands = [];
+  List<dynamic> _models = [];
+  bool _isLoadingBrands = false;
+  bool _isLoadingModels = false;
+  bool _isSaving = false;
+
+  // Step tracking for field enable/disable
+  int _currentStep = 0; // 0=type, 1=brand, 2=model, 3=details
+  bool _showModelsField = false;
+  String? _noModelsMessage;
 
   bool get _isEdit => widget.vehicle != null;
 
@@ -1121,24 +1114,164 @@ class _VehicleFormSheetState extends State<_VehicleFormSheet> {
     if (v != null) {
       _type = v.type;
       _fuelType = v.fuelType;
-      _makeCtrl.text = v.make;
+      _selectedBrand = v.make;
       _modelCtrl.text = v.model;
       _yearCtrl.text = v.year;
-      _regCtrl.text = v.registrationNo;
       _engCtrl.text = v.engineCC;
       _colorCtrl.text = v.color;
+      _currentStep = 3;
+      _showModelsField = true;
+
+      final regParts = v.registrationNo.split('-');
+      if (regParts.length == 2) {
+        _regPrefixCtrl.text = regParts[0];
+        _regNumberCtrl.text = regParts[1];
+      } else {
+        _regPrefixCtrl.text = v.registrationNo;
+      }
+      _loadBrands();
     }
   }
 
   @override
   void dispose() {
-    _makeCtrl.dispose();
+    _regPrefixCtrl.dispose();
+    _regNumberCtrl.dispose();
     _modelCtrl.dispose();
     _yearCtrl.dispose();
-    _regCtrl.dispose();
     _engCtrl.dispose();
     _colorCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadBrands() async {
+    if (_type == null) return;
+
+    setState(() {
+      _isLoadingBrands = true;
+      _brands = [];
+      _selectedBrand = null;
+      _selectedBrandId = null;
+      _models = [];
+      _showModelsField = false;
+      _noModelsMessage = null;
+    });
+
+    try {
+      final result = await widget.apiService.getBrandsWithModelsByType(_type!);
+
+      if (result['success'] && mounted) {
+        final Map<String, dynamic> data = result['data'];
+        final List<String> brandNames = data.keys.toList();
+
+        setState(() {
+          _brands = brandNames.map((name) => {'brandName': name}).toList();
+          _isLoadingBrands = false;
+        });
+      } else {
+        setState(() {
+          _isLoadingBrands = false;
+          _noModelsMessage = "Failed to load brands. Please try again.";
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _isLoadingBrands = false;
+        _noModelsMessage = "Network error. Please check your connection.";
+      });
+    }
+  }
+
+  Future<void> _loadModels() async {
+    if (_selectedBrand == null || _type == null) {
+      setState(() {
+        _models = [];
+        _showModelsField = false;
+        _noModelsMessage = null;
+      });
+      return;
+    }
+
+    setState(() {
+      _isLoadingModels = true;
+      _models = [];
+      _showModelsField = false;
+      _noModelsMessage = null;
+      _modelCtrl.clear();
+    });
+
+    try {
+      final result = await widget.apiService.getBrandsWithModelsByType(_type!);
+
+      if (result['success'] && mounted) {
+        final Map<String, dynamic> data = result['data'];
+        final List<String> modelsList =
+            (data[_selectedBrand] as List<dynamic>?)?.cast<String>() ?? [];
+
+        setState(() {
+          _models = modelsList.map((name) => {'modelName': name}).toList();
+          _isLoadingModels = false;
+
+          if (_models.isEmpty) {
+            _noModelsMessage =
+                "No models available for $_selectedBrand ${_type}s. Coming soon!";
+            _showModelsField = false;
+          } else {
+            _noModelsMessage = null;
+            _showModelsField = true;
+          }
+        });
+      } else {
+        setState(() {
+          _isLoadingModels = false;
+          _noModelsMessage = "Failed to load models. Please try again.";
+          _showModelsField = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _isLoadingModels = false;
+        _noModelsMessage = "Network error. Please check your connection.";
+        _showModelsField = false;
+      });
+    }
+  }
+
+  void _onTypeSelected(String? value) {
+    setState(() {
+      _type = value;
+      _selectedBrand = null;
+      _selectedBrandId = null;
+      _models = [];
+      _modelCtrl.clear();
+      _showModelsField = false;
+      _noModelsMessage = null;
+      _currentStep = _type != null ? 1 : 0;
+    });
+    if (_type != null) {
+      _loadBrands();
+    }
+  }
+
+  void _onBrandSelected(String? value) {
+    setState(() {
+      _selectedBrand = value;
+      _modelCtrl.clear();
+      _models = [];
+      _showModelsField = false;
+      _noModelsMessage = null;
+      _currentStep = _selectedBrand != null ? 2 : 1;
+    });
+    if (_selectedBrand != null) {
+      _loadModels();
+    }
+  }
+
+  void _onModelSelected(String? value) {
+    setState(() {
+      _modelCtrl.text = value ?? '';
+      _currentStep = _modelCtrl.text.isNotEmpty ? 3 : 2;
+    });
   }
 
   Future<void> _save() async {
@@ -1153,15 +1286,18 @@ class _VehicleFormSheetState extends State<_VehicleFormSheet> {
       return;
     }
 
-    setState(() => _isLoading = true);
+    setState(() => _isSaving = true);
+
+    final registrationNo =
+        '${_regPrefixCtrl.text.trim().toUpperCase()}-${_regNumberCtrl.text.trim()}';
 
     final vehicleData = {
       'userId': widget.user.id,
       'type': _type!,
-      'make': _makeCtrl.text.trim(),
+      'make': _selectedBrand!,
       'model': _modelCtrl.text.trim(),
       'year': _yearCtrl.text.trim(),
-      'registrationNo': _regCtrl.text.trim().toUpperCase(),
+      'registrationNo': registrationNo,
       'fuelType': _fuelType!,
       'engineCC': _engCtrl.text.trim(),
       'color': _colorCtrl.text.trim(),
@@ -1178,7 +1314,7 @@ class _VehicleFormSheetState extends State<_VehicleFormSheet> {
     }
 
     if (!mounted) return;
-    setState(() => _isLoading = false);
+    setState(() => _isSaving = false);
 
     if (result['success']) {
       widget.onVehicleUpdated();
@@ -1203,6 +1339,16 @@ class _VehicleFormSheetState extends State<_VehicleFormSheet> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final mq = MediaQuery.of(context);
+
+    // Determine which fields are enabled
+    bool isTypeEnabled = !_isEdit;
+    bool isBrandEnabled = _type != null && !_isEdit && _brands.isNotEmpty;
+    bool isModelEnabled =
+        _showModelsField &&
+        _models.isNotEmpty &&
+        !_isEdit &&
+        _selectedBrand != null;
+    bool isDetailsEnabled = (_modelCtrl.text.isNotEmpty && !_isEdit) || _isEdit;
 
     return Container(
       margin: EdgeInsets.only(top: mq.size.height * 0.08),
@@ -1248,7 +1394,7 @@ class _VehicleFormSheetState extends State<_VehicleFormSheet> {
                 ),
                 const Spacer(),
                 GestureDetector(
-                  onTap: () => Navigator.pop(context),
+                  onTap: () => Navigator.pop(context, false),
                   child: Container(
                     width: 36,
                     height: 36,
@@ -1285,94 +1431,210 @@ class _VehicleFormSheetState extends State<_VehicleFormSheet> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _Label('Vehicle Type', isDark),
+                    // Step 1: Vehicle Type
+                    _Label('Step 1: Vehicle Type', isDark),
                     _Dropdown(
-                      label: 'Type',
+                      label: 'Select Vehicle Type',
                       value: _type,
                       items: _kVehicleTypes,
                       icon: Icons.category_outlined,
                       isDark: isDark,
-                      onChanged: (v) => setState(() => _type = v),
+                      enabled: isTypeEnabled,
+                      onChanged: _onTypeSelected,
                       validator: (v) =>
                           v == null ? 'Select vehicle type' : null,
                     ),
                     const SizedBox(height: 16),
-                    _Label('Make & Model', isDark),
-                    _Dropdown(
-                      label: 'Make / Brand',
-                      value: _kMakes.contains(_makeCtrl.text)
-                          ? _makeCtrl.text
-                          : null,
-                      items: _kMakes,
-                      icon: Icons.branding_watermark_outlined,
-                      isDark: isDark,
-                      onChanged: (v) =>
-                          setState(() => _makeCtrl.text = v ?? ''),
-                      validator: (v) => v == null ? 'Select make' : null,
-                    ),
-                    const SizedBox(height: 12),
+
+                    // Step 2: Brand
+                    _Label('Step 2: Brand', isDark),
+                    _isLoadingBrands && _type != null
+                        ? const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 12),
+                            child: Center(
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: AppColors.emerald,
+                              ),
+                            ),
+                          )
+                        : _Dropdown(
+                            label: 'Select Brand',
+                            value: _selectedBrand,
+                            items: _brands
+                                .map((b) => b['brandName'] as String)
+                                .toList(),
+                            icon: Icons.branding_watermark_outlined,
+                            isDark: isDark,
+                            enabled: isBrandEnabled,
+                            onChanged: _onBrandSelected,
+                            validator: (v) => isBrandEnabled && v == null
+                                ? 'Select brand'
+                                : null,
+                          ),
+                    const SizedBox(height: 16),
+
+                    // Step 3: Model (Conditionally Visible)
+                    if (_showModelsField) ...[
+                      _Label('Step 3: Model', isDark),
+                      _isLoadingModels
+                          ? const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 12),
+                              child: Center(
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: AppColors.emerald,
+                                ),
+                              ),
+                            )
+                          : _Dropdown(
+                              label: 'Select Model',
+                              value: _modelCtrl.text.isEmpty
+                                  ? null
+                                  : _modelCtrl.text,
+                              items: _models
+                                  .map((m) => m['modelName'] as String)
+                                  .toList(),
+                              icon: Icons.directions_car_outlined,
+                              isDark: isDark,
+                              enabled: isModelEnabled,
+                              onChanged: _onModelSelected,
+                              validator: (v) =>
+                                  isModelEnabled && _modelCtrl.text.isEmpty
+                                  ? 'Select model'
+                                  : null,
+                            ),
+                      const SizedBox(height: 16),
+                    ] else if (_noModelsMessage != null &&
+                        !_isEdit &&
+                        _type != null &&
+                        _selectedBrand != null) ...[
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(14),
+                          color: AppColors.amber.withOpacity(
+                            isDark ? 0.12 : 0.08,
+                          ),
+                          border: Border.all(
+                            color: AppColors.amber.withOpacity(0.3),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.info_outline_rounded,
+                              size: 18,
+                              color: AppColors.amber,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                _noModelsMessage!,
+                                style: GoogleFonts.inter(
+                                  fontSize: 13,
+                                  color: AppColors.amber,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+
+                    // Step 4: Year (Only enabled after model is selected)
+                    _Label('Step 4: Year', isDark),
                     AppTextField(
-                      label: 'Model',
-                      hint: 'e.g. Corolla, Civic',
-                      controller: _modelCtrl,
-                      prefixIcon: Icons.directions_car_outlined,
-                      textCapitalization: TextCapitalization.words,
-                      validator: (v) => (v == null || v.trim().isEmpty)
-                          ? 'Model is required'
-                          : null,
+                      label: 'Year',
+                      hint: '2020',
+                      controller: _yearCtrl,
+                      prefixIcon: Icons.calendar_today_outlined,
+                      keyboardType: TextInputType.number,
+                      readOnly: !isDetailsEnabled && !_isEdit,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                        LengthLimitingTextInputFormatter(4),
+                      ],
+                      validator: (v) {
+                        if (!isDetailsEnabled && !_isEdit) return null;
+                        if (v == null || v.trim().isEmpty) return 'Required';
+                        final y = int.tryParse(v.trim());
+                        if (y == null ||
+                            y < 1950 ||
+                            y > DateTime.now().year + 1)
+                          return 'Invalid';
+                        return null;
+                      },
                     ),
                     const SizedBox(height: 16),
-                    _Label('Year & Registration', isDark),
+
+                    // Step 5: Registration Number (Only enabled after model is selected)
+                    _Label('Step 5: Registration Number', isDark),
                     Row(
                       children: [
                         Expanded(
                           flex: 2,
                           child: AppTextField(
-                            label: 'Year',
-                            hint: '2020',
-                            controller: _yearCtrl,
-                            prefixIcon: Icons.calendar_today_outlined,
+                            label: 'Letters',
+                            hint: 'KN',
+                            controller: _regPrefixCtrl,
+                            prefixIcon: Icons.confirmation_number_outlined,
+                            textCapitalization: TextCapitalization.characters,
+                            readOnly: !isDetailsEnabled && !_isEdit,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(
+                                RegExp(r'[A-Za-z]'),
+                              ),
+                              LengthLimitingTextInputFormatter(3),
+                            ],
+                            validator: (v) {
+                              if (!isDetailsEnabled && !_isEdit) return null;
+                              if (v == null || v.trim().isEmpty)
+                                return 'Required';
+                              final val = v.trim().toUpperCase();
+                              if (val.length < 2 || val.length > 3)
+                                return '2-3 letters';
+                              return null;
+                            },
+                          ),
+                        ),
+                        const Text(' - ', style: TextStyle(fontSize: 20)),
+                        Expanded(
+                          flex: 3,
+                          child: AppTextField(
+                            label: 'Numbers',
+                            hint: '6131',
+                            controller: _regNumberCtrl,
                             keyboardType: TextInputType.number,
+                            readOnly: !isDetailsEnabled && !_isEdit,
                             inputFormatters: [
                               FilteringTextInputFormatter.digitsOnly,
                               LengthLimitingTextInputFormatter(4),
                             ],
                             validator: (v) {
+                              if (!isDetailsEnabled && !_isEdit) return null;
                               if (v == null || v.trim().isEmpty)
                                 return 'Required';
-                              final y = int.tryParse(v.trim());
-                              if (y == null ||
-                                  y < 1950 ||
-                                  y > DateTime.now().year + 1)
-                                return 'Invalid';
+                              if (v.trim().length != 4)
+                                return 'Must be 4 digits';
                               return null;
                             },
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          flex: 3,
-                          child: AppTextField(
-                            label: 'Registration No.',
-                            hint: 'WP CAB-1234',
-                            controller: _regCtrl,
-                            prefixIcon: Icons.confirmation_number_outlined,
-                            textCapitalization: TextCapitalization.characters,
-                            validator: (v) => (v == null || v.trim().isEmpty)
-                                ? 'Required'
-                                : null,
                           ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 16),
-                    _Label('Fuel Type', isDark),
+
+                    // Step 6: Fuel Type (Only enabled after model is selected)
+                    _Label('Step 6: Fuel Type', isDark),
                     _FuelPills(
                       selected: _fuelType,
                       isDark: isDark,
+                      enabled: isDetailsEnabled || _isEdit,
                       onSelect: (f) => setState(() => _fuelType = f),
                     ),
-                    if (_fuelType == null)
+                    if (_fuelType == null && (isDetailsEnabled || _isEdit))
                       Padding(
                         padding: const EdgeInsets.only(top: 6, left: 4),
                         child: Text(
@@ -1384,7 +1646,9 @@ class _VehicleFormSheetState extends State<_VehicleFormSheet> {
                         ),
                       ),
                     const SizedBox(height: 16),
-                    _Label('Additional Details (Optional)', isDark),
+
+                    // Step 7: Additional Details (Only enabled after model is selected)
+                    _Label('Step 7: Additional Details (Optional)', isDark),
                     Row(
                       children: [
                         Expanded(
@@ -1394,6 +1658,7 @@ class _VehicleFormSheetState extends State<_VehicleFormSheet> {
                             controller: _engCtrl,
                             prefixIcon: Icons.settings_rounded,
                             keyboardType: TextInputType.number,
+                            readOnly: !isDetailsEnabled && !_isEdit,
                             inputFormatters: [
                               FilteringTextInputFormatter.digitsOnly,
                               LengthLimitingTextInputFormatter(5),
@@ -1408,15 +1673,21 @@ class _VehicleFormSheetState extends State<_VehicleFormSheet> {
                             controller: _colorCtrl,
                             prefixIcon: Icons.palette_outlined,
                             textCapitalization: TextCapitalization.words,
+                            readOnly: !isDetailsEnabled && !_isEdit,
                           ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 28),
+
+                    // Save Button (Only enabled when all required steps are complete)
                     GradientButton(
                       label: _isEdit ? 'Update Vehicle' : 'Add to Garage',
-                      onPressed: _save,
-                      isLoading: _isLoading,
+                      onPressed:
+                          (_currentStep >= 3 || _isEdit) && _fuelType != null
+                          ? _save
+                          : null,
+                      isLoading: _isSaving,
                       colors: [AppColors.emerald, AppColors.ocean],
                     ),
                     const SizedBox(height: 32),
@@ -1454,11 +1725,13 @@ class _Label extends StatelessWidget {
 class _FuelPills extends StatelessWidget {
   final String? selected;
   final bool isDark;
+  final bool enabled;
   final ValueChanged<String> onSelect;
   const _FuelPills({
     required this.selected,
     required this.isDark,
     required this.onSelect,
+    this.enabled = true,
   });
 
   Color _col(String f) {
@@ -1486,7 +1759,7 @@ class _FuelPills extends StatelessWidget {
       final sel = f == selected;
       final c = _col(f);
       return GestureDetector(
-        onTap: () => onSelect(f),
+        onTap: enabled ? () => onSelect(f) : null,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
@@ -1526,6 +1799,7 @@ class _Dropdown extends StatelessWidget {
   final List<String> items;
   final IconData icon;
   final bool isDark;
+  final bool enabled;
   final ValueChanged<String?> onChanged;
   final String? Function(String?)? validator;
   const _Dropdown({
@@ -1536,6 +1810,7 @@ class _Dropdown extends StatelessWidget {
     required this.isDark,
     required this.onChanged,
     this.validator,
+    this.enabled = true,
   });
 
   @override
@@ -1546,18 +1821,20 @@ class _Dropdown extends StatelessWidget {
     final hc = isDark ? AppColors.darkTextMuted : AppColors.lightTextMuted;
     return DropdownButtonFormField<String>(
       value: value,
-      onChanged: onChanged,
+      onChanged: enabled ? onChanged : null,
       validator: validator,
       isExpanded: true,
       icon: Icon(Icons.keyboard_arrow_down_rounded, color: hc),
       dropdownColor: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-      style: GoogleFonts.inter(fontSize: 14, color: tc),
+      style: GoogleFonts.inter(fontSize: 14, color: enabled ? tc : hc),
       decoration: InputDecoration(
         labelText: label,
         prefixIcon: Icon(
           icon,
           size: 20,
-          color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
+          color: enabled
+              ? (isDark ? AppColors.darkTextSub : AppColors.lightTextSub)
+              : hc,
         ),
         filled: true,
         fillColor: fc,
@@ -1586,7 +1863,13 @@ class _Dropdown extends StatelessWidget {
           .map(
             (i) => DropdownMenuItem(
               value: i,
-              child: Text(i, style: GoogleFonts.inter(fontSize: 14, color: tc)),
+              child: Text(
+                i,
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  color: enabled ? tc : hc,
+                ),
+              ),
             ),
           )
           .toList(),

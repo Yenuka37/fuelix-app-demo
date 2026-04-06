@@ -28,22 +28,23 @@ class TopBar extends StatefulWidget {
 class _TopBarState extends State<TopBar> with TickerProviderStateMixin {
   AnimationController? _bellController;
   Animation<double>? _bellRotation;
-  late AnimationController _counterController;
-  late Animation<double> _counterScale;
+  late AnimationController _dotController;
+  late Animation<double> _dotScale;
 
   @override
   void initState() {
     super.initState();
-    _counterController = AnimationController(
+    _dotController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 400),
     );
-    _counterScale = Tween<double>(begin: 0.5, end: 1.0).animate(
-      CurvedAnimation(parent: _counterController, curve: Curves.elasticOut),
+    _dotScale = Tween<double>(begin: 0.5, end: 1.0).animate(
+      CurvedAnimation(parent: _dotController, curve: Curves.elasticOut),
     );
 
     if (widget.unreadCount > 0) {
       _initBellAnimation();
+      _dotController.forward(from: 0);
     }
   }
 
@@ -72,7 +73,7 @@ class _TopBarState extends State<TopBar> with TickerProviderStateMixin {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.unreadCount == 0 && widget.unreadCount > 0) {
       _initBellAnimation();
-      _counterController.forward(from: 0);
+      _dotController.forward(from: 0);
     } else if (oldWidget.unreadCount > 0 && widget.unreadCount == 0) {
       _bellController?.dispose();
       _bellController = null;
@@ -83,7 +84,7 @@ class _TopBarState extends State<TopBar> with TickerProviderStateMixin {
   @override
   void dispose() {
     _bellController?.dispose();
-    _counterController.dispose();
+    _dotController.dispose();
     super.dispose();
   }
 
@@ -133,7 +134,7 @@ class _TopBarState extends State<TopBar> with TickerProviderStateMixin {
             child: AnimatedBuilder(
               animation: Listenable.merge([
                 if (_bellController != null) _bellController!,
-                _counterController,
+                _dotController,
               ]),
               builder: (context, child) {
                 return Container(
@@ -177,32 +178,19 @@ class _TopBarState extends State<TopBar> with TickerProviderStateMixin {
                                 ? AppColors.darkTextSub
                                 : AppColors.lightTextSub,
                           ),
+                        // Red dot indicator (replaces count)
                         if (hasUnread)
                           Positioned(
-                            right: -8,
-                            top: -8,
+                            top: 2,
+                            right: 2,
                             child: ScaleTransition(
-                              scale: _counterScale,
+                              scale: _dotScale,
                               child: Container(
-                                padding: const EdgeInsets.all(3),
+                                width: 10,
+                                height: 10,
                                 decoration: const BoxDecoration(
                                   shape: BoxShape.circle,
                                   color: AppColors.error,
-                                ),
-                                constraints: const BoxConstraints(
-                                  minWidth: 16,
-                                  minHeight: 16,
-                                ),
-                                child: Text(
-                                  widget.unreadCount > 9
-                                      ? '9+'
-                                      : '${widget.unreadCount}',
-                                  style: GoogleFonts.inter(
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.w700,
-                                    color: Colors.white,
-                                  ),
-                                  textAlign: TextAlign.center,
                                 ),
                               ),
                             ),

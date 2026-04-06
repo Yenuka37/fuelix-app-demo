@@ -159,8 +159,6 @@ class _NotificationsScreenState extends State<NotificationsScreen>
           return b.createdAt.compareTo(a.createdAt);
         });
       });
-
-      // Return true to indicate refresh needed when going back
     } catch (e) {
       print('Error marking as read locally: $e');
     }
@@ -829,7 +827,6 @@ class _NotificationDetailDialogState extends State<NotificationDetailDialog>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Header with gradient
               Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
@@ -882,13 +879,11 @@ class _NotificationDetailDialogState extends State<NotificationDetailDialog>
                 ),
               ),
 
-              // Content
               Padding(
                 padding: const EdgeInsets.all(20),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Type badge and read status
                     Row(
                       children: [
                         Container(
@@ -947,7 +942,6 @@ class _NotificationDetailDialogState extends State<NotificationDetailDialog>
                     ),
                     const SizedBox(height: 16),
 
-                    // Message
                     Text(
                       widget.notification.message,
                       style: GoogleFonts.inter(
@@ -960,7 +954,6 @@ class _NotificationDetailDialogState extends State<NotificationDetailDialog>
                     ),
                     const SizedBox(height: 20),
 
-                    // Divider
                     Container(
                       height: 1,
                       color: isDark
@@ -969,12 +962,10 @@ class _NotificationDetailDialogState extends State<NotificationDetailDialog>
                     ),
                     const SizedBox(height: 16),
 
-                    // Additional info based on notification type
                     if (widget.notification.data != null &&
                         widget.notification.data!.containsKey('type'))
                       _buildAdditionalInfo(isDark, widget.notification.data!),
 
-                    // Full timestamp
                     Row(
                       children: [
                         Icon(
@@ -998,7 +989,6 @@ class _NotificationDetailDialogState extends State<NotificationDetailDialog>
                     ),
                     const SizedBox(height: 20),
 
-                    // Single Close button only
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(

@@ -11,6 +11,7 @@ class RecentFuelLogs extends StatefulWidget {
   final List<VehicleModel> vehicles;
   final bool isDark;
   final VoidCallback onAddLog;
+  final VoidCallback onRefresh;
 
   const RecentFuelLogs({
     super.key,
@@ -18,6 +19,7 @@ class RecentFuelLogs extends StatefulWidget {
     required this.vehicles,
     required this.isDark,
     required this.onAddLog,
+    required this.onRefresh,
   });
 
   @override
@@ -26,16 +28,23 @@ class RecentFuelLogs extends StatefulWidget {
 
 class _RecentFuelLogsState extends State<RecentFuelLogs> {
   final ApiService _apiService = ApiService();
+  bool _isDeleting = false;
 
   Future<void> _deleteLog(FuelLogModel log) async {
     if (log.id == null) return;
+
+    setState(() => _isDeleting = true);
+
     final result = await _apiService.deleteFuelLog(log.id!);
+
     if (result['success']) {
+      widget.onRefresh();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Log deleted'),
             backgroundColor: AppColors.emerald,
+            duration: Duration(seconds: 1),
           ),
         );
       }
@@ -49,6 +58,8 @@ class _RecentFuelLogsState extends State<RecentFuelLogs> {
         );
       }
     }
+
+    setState(() => _isDeleting = false);
   }
 
   void _showDeleteConfirm(FuelLogModel log) {
@@ -172,6 +183,7 @@ class _RecentFuelLogsState extends State<RecentFuelLogs> {
                 vehicle: vehicle,
                 isDark: widget.isDark,
                 onDelete: () => _showDeleteConfirm(log),
+                isDeleting: _isDeleting,
               );
             }).toList(),
           ),
@@ -194,12 +206,14 @@ class _FuelLogTile extends StatelessWidget {
   final VehicleModel vehicle;
   final bool isDark;
   final VoidCallback onDelete;
+  final bool isDeleting;
 
   const _FuelLogTile({
     required this.log,
     required this.vehicle,
     required this.isDark,
     required this.onDelete,
+    this.isDeleting = false,
   });
 
   @override
@@ -216,117 +230,120 @@ class _FuelLogTile extends StatelessWidget {
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(14),
-        onLongPress: onDelete,
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  color: accent.withOpacity(isDark ? 0.14 : 0.10),
+        onLongPress: isDeleting ? null : onDelete,
+        child: Opacity(
+          opacity: isDeleting ? 0.5 : 1.0,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    color: accent.withOpacity(isDark ? 0.14 : 0.10),
+                  ),
+                  child: Icon(
+                    Icons.local_gas_station_rounded,
+                    size: 22,
+                    color: accent,
+                  ),
                 ),
-                child: Icon(
-                  Icons.local_gas_station_rounded,
-                  size: 22,
-                  color: accent,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            vehicle.shortDisplay,
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              vehicle.shortDisplay,
+                              style: GoogleFonts.spaceGrotesk(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: isDark
+                                    ? AppColors.darkText
+                                    : AppColors.lightText,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Text(
+                            '${log.litres.toStringAsFixed(1)} L',
                             style: GoogleFonts.spaceGrotesk(
                               fontSize: 14,
                               fontWeight: FontWeight.w700,
-                              color: isDark
-                                  ? AppColors.darkText
-                                  : AppColors.lightText,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        Text(
-                          '${log.litres.toStringAsFixed(1)} L',
-                          style: GoogleFonts.spaceGrotesk(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            color: accent,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(5),
-                            color: accent.withOpacity(isDark ? 0.15 : 0.10),
-                          ),
-                          child: Text(
-                            log.fuelGrade,
-                            style: GoogleFonts.inter(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
                               color: accent,
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            log.stationName.isNotEmpty
-                                ? log.stationName
-                                : 'Unknown station',
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(5),
+                              color: accent.withOpacity(isDark ? 0.15 : 0.10),
+                            ),
+                            child: Text(
+                              log.fuelGrade,
+                              style: GoogleFonts.inter(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                                color: accent,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              log.stationName.isNotEmpty
+                                  ? log.stationName
+                                  : 'Unknown station',
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                color: isDark
+                                    ? AppColors.darkTextSub
+                                    : AppColors.lightTextSub,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Text(
+                            log.totalCost > 0
+                                ? 'Rs. ${log.totalCost.toStringAsFixed(0)}'
+                                : '',
                             style: GoogleFonts.inter(
                               fontSize: 12,
                               color: isDark
-                                  ? AppColors.darkTextSub
-                                  : AppColors.lightTextSub,
+                                  ? AppColors.darkTextMuted
+                                  : AppColors.lightTextMuted,
                             ),
-                            overflow: TextOverflow.ellipsis,
                           ),
-                        ),
-                        Text(
-                          log.totalCost > 0
-                              ? 'Rs. ${log.totalCost.toStringAsFixed(0)}'
-                              : '',
-                          style: GoogleFonts.inter(
-                            fontSize: 12,
-                            color: isDark
-                                ? AppColors.darkTextMuted
-                                : AppColors.lightTextMuted,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${log.formattedDate} · ${log.formattedTime}',
-                      style: GoogleFonts.inter(
-                        fontSize: 11,
-                        color: isDark
-                            ? AppColors.darkTextMuted
-                            : AppColors.lightTextMuted,
+                        ],
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 2),
+                      Text(
+                        '${log.formattedDate} · ${log.formattedTime}',
+                        style: GoogleFonts.inter(
+                          fontSize: 11,
+                          color: isDark
+                              ? AppColors.darkTextMuted
+                              : AppColors.lightTextMuted,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -345,6 +362,7 @@ class _EmptyActivity extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
+        width: double.infinity,
         padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 20),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),

@@ -97,7 +97,9 @@ class _FuelLogScreenState extends State<FuelLogScreen>
     if (_vehicles.isNotEmpty) {
       _selectedVehicle = _vehicles.first;
       _litresCtrl.addListener(() => setState(() {}));
-      _loadFuelPrices();
+      _checkFuelPassAndLoad();
+    } else {
+      setState(() => _limitsLoaded = true);
     }
 
     _animCtrl.forward();
@@ -118,6 +120,18 @@ class _FuelLogScreenState extends State<FuelLogScreen>
       await Future.delayed(const Duration(milliseconds: 500));
       if (mounted) setState(() => _showTour = true);
     }
+  }
+
+  Future<void> _checkFuelPassAndLoad() async {
+    // Check if selected vehicle has Fuel Pass generated
+    if (_selectedVehicle.fuelPassCode == null ||
+        _selectedVehicle.fuelPassCode!.isEmpty) {
+      setState(() {
+        _limitsLoaded = true;
+      });
+      return;
+    }
+    await _loadFuelPrices();
   }
 
   // Load fuel prices from backend
@@ -149,6 +163,7 @@ class _FuelLogScreenState extends State<FuelLogScreen>
               backgroundColor: AppColors.error,
             ),
           );
+          setState(() => _limitsLoaded = true);
         }
       }
     } catch (e) {
@@ -160,12 +175,20 @@ class _FuelLogScreenState extends State<FuelLogScreen>
             backgroundColor: AppColors.error,
           ),
         );
+        setState(() => _limitsLoaded = true);
       }
     }
   }
 
   Future<void> _refreshGradesAndLimits() async {
     if (_vehicles.isEmpty) {
+      setState(() => _limitsLoaded = true);
+      return;
+    }
+
+    // Check if vehicle has Fuel Pass
+    if (_selectedVehicle.fuelPassCode == null ||
+        _selectedVehicle.fuelPassCode!.isEmpty) {
       setState(() => _limitsLoaded = true);
       return;
     }
@@ -215,6 +238,19 @@ class _FuelLogScreenState extends State<FuelLogScreen>
     if (!_formKey.currentState!.validate()) return;
     if (_selectedGrade == null) return;
 
+    // Double check fuel pass exists before saving
+    if (_selectedVehicle.fuelPassCode == null ||
+        _selectedVehicle.fuelPassCode!.isEmpty) {
+      showAppSnackbar(
+        context,
+        message:
+            'Please generate Fuel Pass for this vehicle before logging fuel.',
+        isError: true,
+      );
+      Navigator.pop(context);
+      return;
+    }
+
     setState(() => _isSaving = true);
 
     final litres = double.parse(_litresCtrl.text.trim());
@@ -260,6 +296,13 @@ class _FuelLogScreenState extends State<FuelLogScreen>
         message: 'Insufficient wallet balance. Top up to continue.',
         isError: true,
       );
+    } else if (result['error'].contains('Fuel Pass')) {
+      showAppSnackbar(
+        context,
+        message: 'Please generate Fuel Pass for this vehicle first.',
+        isError: true,
+      );
+      Navigator.pop(context);
     } else {
       showAppSnackbar(
         context,
@@ -317,6 +360,10 @@ class _FuelLogScreenState extends State<FuelLogScreen>
     } catch (e) {
       print('Error refreshing vehicles: $e');
     }
+  }
+
+  bool _hasFuelPass(VehicleModel vehicle) {
+    return vehicle.fuelPassCode != null && vehicle.fuelPassCode!.isNotEmpty;
   }
 
   @override
@@ -435,16 +482,16 @@ class _FuelLogScreenState extends State<FuelLogScreen>
                                     onChanged: (v) async {
                                       if (v == null) return;
                                       setState(() => _selectedVehicle = v);
-                                      await _refreshGradesAndLimits();
+                                      await _checkFuelPassAndLoad();
                                     },
                                   ),
                                 ),
                                 const SizedBox(height: 20),
 
-                                // Quota + wallet info bar
-                                if (_limitsLoaded)
-                                  _buildLimitsBar(isDark)
-                                else
+                                // Fuel Pass Status Check
+                                if (!_hasFuelPass(_selectedVehicle))
+                                  _buildNoFuelPassWarning(isDark)
+                                else if (!_limitsLoaded)
                                   const Center(
                                     child: Padding(
                                       padding: EdgeInsets.symmetric(
@@ -455,55 +502,60 @@ class _FuelLogScreenState extends State<FuelLogScreen>
                                         color: AppColors.emerald,
                                       ),
                                     ),
-                                  ),
-                                const SizedBox(height: 20),
-
-                                // Fuel grade selector
-                                if (_availableGrades.isEmpty) ...[
-                                  _buildUnsupportedFuelNote(isDark),
-                                ] else ...[
-                                  _sectionLabel('Fuel Grade', isDark),
-                                  const SizedBox(height: 10),
-                                  KeyedSubtree(
-                                    key: _keyGradeSelector,
-                                    child: _buildGradeSelector(isDark),
-                                  ),
+                                  )
+                                else ...[
+                                  // Quota + wallet info bar
+                                  _buildLimitsBar(isDark),
                                   const SizedBox(height: 20),
 
-                                  // Litres field
-                                  _sectionLabel('Litres Filled', isDark),
-                                  const SizedBox(height: 8),
-                                  KeyedSubtree(
-                                    key: _keyLitresField,
-                                    child: _buildLitresField(isDark),
-                                  ),
-                                  const SizedBox(height: 20),
-
-                                  // Station name
-                                  AppTextField(
-                                    label: 'Station Name (optional)',
-                                    hint: 'e.g. CPC Colombo 7',
-                                    controller: _stationCtrl,
-                                    prefixIcon: Icons.place_outlined,
-                                  ),
-                                  const SizedBox(height: 20),
-
-                                  // Cost preview
-                                  if (_totalCost > 0) _buildCostPreview(isDark),
-                                  const SizedBox(height: 8),
-
-                                  // Save button
-                                  KeyedSubtree(
-                                    key: _keySaveButton,
-                                    child: GradientButton(
-                                      label: 'Save Fuel Log',
-                                      onPressed:
-                                          (_limitsLoaded && _maxLitres > 0)
-                                          ? _save
-                                          : null,
-                                      isLoading: _isSaving,
+                                  // Fuel grade selector
+                                  if (_availableGrades.isEmpty) ...[
+                                    _buildUnsupportedFuelNote(isDark),
+                                  ] else ...[
+                                    _sectionLabel('Fuel Grade', isDark),
+                                    const SizedBox(height: 10),
+                                    KeyedSubtree(
+                                      key: _keyGradeSelector,
+                                      child: _buildGradeSelector(isDark),
                                     ),
-                                  ),
+                                    const SizedBox(height: 20),
+
+                                    // Litres field
+                                    _sectionLabel('Litres Filled', isDark),
+                                    const SizedBox(height: 8),
+                                    KeyedSubtree(
+                                      key: _keyLitresField,
+                                      child: _buildLitresField(isDark),
+                                    ),
+                                    const SizedBox(height: 20),
+
+                                    // Station name
+                                    AppTextField(
+                                      label: 'Station Name (optional)',
+                                      hint: 'e.g. CPC Colombo 7',
+                                      controller: _stationCtrl,
+                                      prefixIcon: Icons.place_outlined,
+                                    ),
+                                    const SizedBox(height: 20),
+
+                                    // Cost preview
+                                    if (_totalCost > 0)
+                                      _buildCostPreview(isDark),
+                                    const SizedBox(height: 8),
+
+                                    // Save button
+                                    KeyedSubtree(
+                                      key: _keySaveButton,
+                                      child: GradientButton(
+                                        label: 'Save Fuel Log',
+                                        onPressed:
+                                            (_limitsLoaded && _maxLitres > 0)
+                                            ? _save
+                                            : null,
+                                        isLoading: _isSaving,
+                                      ),
+                                    ),
+                                  ],
                                 ],
                               ],
                             ),
@@ -561,6 +613,61 @@ class _FuelLogScreenState extends State<FuelLogScreen>
         if (mounted) setState(() => _showTour = false);
       },
       child: screen,
+    );
+  }
+
+  Widget _buildNoFuelPassWarning(bool isDark) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        color: AppColors.error.withOpacity(isDark ? 0.12 : 0.08),
+        border: Border.all(color: AppColors.error.withOpacity(0.3)),
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: 60,
+            height: 60,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: AppColors.error.withOpacity(0.15),
+            ),
+            child: Icon(
+              Icons.qr_code_rounded,
+              size: 30,
+              color: AppColors.error,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Fuel Pass Not Generated',
+            style: GoogleFonts.spaceGrotesk(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: AppColors.error,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Please generate a Fuel Pass for ${_selectedVehicle.shortDisplay} before logging fuel.',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.inter(
+              fontSize: 14,
+              color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
+            ),
+          ),
+          const SizedBox(height: 20),
+          GradientButton(
+            label: 'Generate Fuel Pass',
+            onPressed: () {
+              Navigator.pop(context);
+            },
+            colors: [AppColors.emerald, AppColors.ocean],
+            height: 44,
+          ),
+        ],
+      ),
     );
   }
 

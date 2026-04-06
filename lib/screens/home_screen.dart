@@ -9,6 +9,7 @@ import '../models/fuel_log_model.dart';
 import '../services/api_service.dart';
 import '../services/notification_local_service.dart';
 import '../services/tutorial_service.dart';
+import '../widgets/custom_button.dart';
 import '../widgets/tutorial_overlay.dart';
 import '../screens/fuel_log_screen.dart';
 import '../screens/notifications_screen.dart';
@@ -45,6 +46,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   final ApiService _apiService = ApiService();
   final NotificationLocalService _localService = NotificationLocalService();
 
+  bool _isRefreshing = false;
+
   // Tutorial keys
   final _keyWelcome = GlobalKey();
   final _keyVehicles = GlobalKey();
@@ -52,6 +55,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   final _keyActions = GlobalKey();
   final _keyFuelLogAction = GlobalKey();
   final _keyNotifications = GlobalKey();
+  final _keyRefreshButton = GlobalKey();
   bool _showTour = false;
 
   @override
@@ -98,12 +102,17 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   Future<void> _loadAll() async {
+    if (_isRefreshing) return;
+    setState(() => _isRefreshing = true);
+
     await Future.wait([
       _loadVehicles(),
       _loadWallet(),
       _loadFuelData(),
       _loadUnreadCount(),
     ]);
+
+    setState(() => _isRefreshing = false);
   }
 
   Future<void> _loadVehicles() async {
@@ -238,8 +247,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       arguments: _user,
     );
     if (result == true) {
-      await _loadVehicles();
-      await _loadFuelData();
+      await _loadAll();
     }
   }
 
@@ -250,9 +258,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       arguments: _user,
     );
     if (result == true) {
-      await _loadWallet();
-      await _loadVehicles();
-      await _loadFuelData();
+      await _loadAll();
     }
   }
 
@@ -357,112 +363,120 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             opacity: _fadeAnim,
             child: SlideTransition(
               position: _slideAnim,
-              child: CustomScrollView(
-                physics: const BouncingScrollPhysics(),
-                slivers: [
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
-                      child: TopBar(
-                        user: _user,
-                        unreadCount: _unreadCount,
-                        isDark: isDark,
-                        onProfileTap: () => Navigator.pushNamed(
-                          context,
-                          '/profile',
-                          arguments: _user,
-                        ),
-                        onNotificationsTap: _goToNotifications,
-                        notificationsKey: _keyNotifications,
-                      ),
-                    ),
-                  ),
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(24, 28, 24, 0),
-                      child: KeyedSubtree(
-                        key: _keyWelcome,
-                        child: WelcomeCard(user: _user, isDark: isDark),
-                      ),
-                    ),
-                  ),
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
-                      child: StatsRow(stats: _stats, isDark: isDark),
-                    ),
-                  ),
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(24, 14, 24, 0),
-                      child: KeyedSubtree(
-                        key: _keyWallet,
-                        child: WalletPreview(
-                          wallet: _wallet,
+              child: RefreshIndicator(
+                onRefresh: _loadAll,
+                color: AppColors.emerald,
+                displacement: 40,
+                edgeOffset: 20,
+                strokeWidth: 2.5,
+                triggerMode: RefreshIndicatorTriggerMode.onEdge,
+                child: CustomScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  slivers: [
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
+                        child: TopBar(
+                          user: _user,
+                          unreadCount: _unreadCount,
                           isDark: isDark,
-                          onTap: _goToTopUp,
+                          onProfileTap: () => Navigator.pushNamed(
+                            context,
+                            '/profile',
+                            arguments: _user,
+                          ),
+                          onNotificationsTap: _goToNotifications,
+                          notificationsKey: _keyNotifications,
                         ),
                       ),
                     ),
-                  ),
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(24, 28, 24, 0),
-                      child: KeyedSubtree(
-                        key: _keyVehicles,
-                        child: MyVehicles(
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(24, 28, 24, 0),
+                        child: KeyedSubtree(
+                          key: _keyWelcome,
+                          child: WelcomeCard(user: _user, isDark: isDark),
+                        ),
+                      ),
+                    ),
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
+                        child: StatsRow(stats: _stats, isDark: isDark),
+                      ),
+                    ),
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(24, 14, 24, 0),
+                        child: KeyedSubtree(
+                          key: _keyWallet,
+                          child: WalletPreview(
+                            wallet: _wallet,
+                            isDark: isDark,
+                            onTap: _goToTopUp,
+                          ),
+                        ),
+                      ),
+                    ),
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(24, 28, 24, 0),
+                        child: KeyedSubtree(
+                          key: _keyVehicles,
+                          child: MyVehicles(
+                            vehicles: _vehicles,
+                            isDark: isDark,
+                            onManageTap: _goToVehicles,
+                          ),
+                        ),
+                      ),
+                    ),
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(24, 28, 24, 14),
+                        child: KeyedSubtree(
+                          key: _keyActions,
+                          child: Text(
+                            'Quick Actions',
+                            style: Theme.of(context).textTheme.headlineSmall,
+                          ),
+                        ),
+                      ),
+                    ),
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: QuickActions(
+                          isDark: isDark,
+                          onFuelLog: _openFuelLogScreen,
+                          onAnalytics: () {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Analytics coming soon!'),
+                              ),
+                            );
+                          },
+                          onFuelStations: _goToFuelStations,
+                          onTopUp: _goToTopUp,
+                          fuelLogKey: _keyFuelLogAction,
+                        ),
+                      ),
+                    ),
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(24, 28, 24, 14),
+                        child: RecentFuelLogs(
+                          recentLogs: _recentLogs,
                           vehicles: _vehicles,
                           isDark: isDark,
-                          onManageTap: _goToVehicles,
+                          onAddLog: _openFuelLogScreen,
+                          onRefresh: _loadAll,
                         ),
                       ),
                     ),
-                  ),
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(24, 28, 24, 14),
-                      child: KeyedSubtree(
-                        key: _keyActions,
-                        child: Text(
-                          'Quick Actions',
-                          style: Theme.of(context).textTheme.headlineSmall,
-                        ),
-                      ),
-                    ),
-                  ),
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: QuickActions(
-                        isDark: isDark,
-                        onFuelLog: _openFuelLogScreen,
-                        onAnalytics: () {
-                          // TODO: Navigate to analytics screen
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Analytics coming soon!'),
-                            ),
-                          );
-                        },
-                        onFuelStations: _goToFuelStations,
-                        onTopUp: _goToTopUp,
-                        fuelLogKey: _keyFuelLogAction,
-                      ),
-                    ),
-                  ),
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(24, 28, 24, 14),
-                      child: RecentFuelLogs(
-                        recentLogs: _recentLogs,
-                        vehicles: _vehicles,
-                        isDark: isDark,
-                        onAddLog: _openFuelLogScreen,
-                      ),
-                    ),
-                  ),
-                  const SliverToBoxAdapter(child: SizedBox(height: 40)),
-                ],
+                    const SliverToBoxAdapter(child: SizedBox(height: 40)),
+                  ],
+                ),
               ),
             ),
           ),
