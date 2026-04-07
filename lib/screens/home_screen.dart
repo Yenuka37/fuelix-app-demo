@@ -13,6 +13,7 @@ import '../widgets/custom_button.dart';
 import '../widgets/tutorial_overlay.dart';
 import '../screens/fuel_log_screen.dart';
 import '../screens/notifications_screen.dart';
+import '../screens/qr_scanner_screen.dart';
 import 'home/widgets/top_bar.dart';
 import 'home/widgets/welcome_card.dart';
 import 'home/widgets/stats_row.dart';
@@ -56,6 +57,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   final _keyFuelLogAction = GlobalKey();
   final _keyNotifications = GlobalKey();
   final _keyRefreshButton = GlobalKey();
+  final _keyQrScan = GlobalKey();
   bool _showTour = false;
 
   @override
@@ -277,6 +279,17 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     if (result == true) await _loadUnreadCount();
   }
 
+  void _openQrScanner() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => QrScannerScreen(user: _user)),
+    ).then((result) {
+      if (result == true) {
+        _loadAll();
+      }
+    });
+  }
+
   void _openFuelLogScreen() {
     if (_vehicles.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -386,7 +399,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                             arguments: _user,
                           ),
                           onNotificationsTap: _goToNotifications,
+                          onQrScanTap: _openQrScanner,
                           notificationsKey: _keyNotifications,
+                          qrScanKey: _keyQrScan,
                         ),
                       ),
                     ),
@@ -540,6 +555,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               'Tap the bell icon to see your alerts. The gold bell shows unread notifications.',
           icon: Icons.notifications_rounded,
           gradient: [AppColors.amber, AppColors.emerald],
+          position: TooltipPosition.below,
+        ),
+        TourStep(
+          targetKey: _keyQrScan,
+          title: 'QR Scanner',
+          body:
+              'Tap here to scan QR codes at fuel stations for quick fuel logging and payments.',
+          icon: Icons.qr_code_scanner_rounded,
+          gradient: [AppColors.emerald, AppColors.ocean],
           position: TooltipPosition.below,
         ),
       ],
