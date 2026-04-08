@@ -11,7 +11,6 @@ import '../services/tutorial_service.dart';
 import '../widgets/custom_button.dart';
 import '../widgets/tutorial_overlay.dart';
 
-// Fuel grade model from backend
 class FuelGrade {
   final int id;
   final String name;
@@ -30,12 +29,16 @@ class FuelLogScreen extends StatefulWidget {
   final UserModel user;
   final List<VehicleModel> vehicles;
   final double walletBalance;
+  final int? selectedVehicleId;
+  final double? preScannedQuota;
 
   const FuelLogScreen({
     super.key,
     required this.user,
     required this.vehicles,
     required this.walletBalance,
+    this.selectedVehicleId,
+    this.preScannedQuota,
   });
 
   @override
@@ -52,7 +55,7 @@ class _FuelLogScreenState extends State<FuelLogScreen>
   List<FuelGrade> _availableGrades = [];
 
   final _litresCtrl = TextEditingController();
-  final _stationCtrl = TextEditingController();
+  final _fuelAmountCtrl = TextEditingController();
 
   bool _isSaving = false;
   double _quotaRemaining = 0;
@@ -68,8 +71,13 @@ class _FuelLogScreenState extends State<FuelLogScreen>
   final _keyVehicleSelector = GlobalKey();
   final _keyGradeSelector = GlobalKey();
   final _keyLitresField = GlobalKey();
+  final _keyAmountField = GlobalKey();
   final _keySaveButton = GlobalKey();
   bool _showTour = false;
+
+  // Flag to track if this is a pre-scanned flow
+  bool get _isPreScanned =>
+      widget.selectedVehicleId != null && widget.vehicles.length == 1;
 
   double get _maxLitres {
     if (_selectedGrade == null) return _quotaRemaining;
@@ -80,6 +88,12 @@ class _FuelLogScreenState extends State<FuelLogScreen>
   double get _totalCost {
     final litres = double.tryParse(_litresCtrl.text) ?? 0;
     return litres * (_selectedGrade?.pricePerLitre ?? 0);
+  }
+
+  double get _calculatedLitresFromAmount {
+    final amount = double.tryParse(_fuelAmountCtrl.text) ?? 0;
+    if (amount <= 0 || _selectedGrade == null) return 0;
+    return amount / _selectedGrade!.pricePerLitre;
   }
 
   @override
@@ -94,9 +108,31 @@ class _FuelLogScreenState extends State<FuelLogScreen>
     _vehicles = List.from(widget.vehicles);
     _walletBalance = widget.walletBalance;
 
+    // If pre-scanned quota is provided, use it
+    if (widget.preScannedQuota != null) {
+      _quotaRemaining = widget.preScannedQuota!;
+    }
+
     if (_vehicles.isNotEmpty) {
-      _selectedVehicle = _vehicles.first;
+      // If selectedVehicleId is provided, use that vehicle
+      if (widget.selectedVehicleId != null) {
+        _selectedVehicle = _vehicles.firstWhere(
+          (v) => v.id == widget.selectedVehicleId,
+          orElse: () => _vehicles.first,
+        );
+      } else {
+        _selectedVehicle = _vehicles.first;
+      }
       _litresCtrl.addListener(() => setState(() {}));
+      _fuelAmountCtrl.addListener(() {
+        if (_fuelAmountCtrl.text.isNotEmpty) {
+          final litres = _calculatedLitresFromAmount;
+          if (litres > 0) {
+            _litresCtrl.text = litres.toStringAsFixed(2);
+          }
+        }
+        setState(() {});
+      });
       _checkFuelPassAndLoad();
     } else {
       setState(() => _limitsLoaded = true);
@@ -109,7 +145,7 @@ class _FuelLogScreenState extends State<FuelLogScreen>
   @override
   void dispose() {
     _litresCtrl.dispose();
-    _stationCtrl.dispose();
+    _fuelAmountCtrl.dispose();
     _animCtrl.dispose();
     super.dispose();
   }
@@ -123,7 +159,6 @@ class _FuelLogScreenState extends State<FuelLogScreen>
   }
 
   Future<void> _checkFuelPassAndLoad() async {
-    // Check if selected vehicle has Fuel Pass generated
     if (_selectedVehicle.fuelPassCode == null ||
         _selectedVehicle.fuelPassCode!.isEmpty) {
       setState(() {
@@ -134,7 +169,6 @@ class _FuelLogScreenState extends State<FuelLogScreen>
     await _loadFuelPrices();
   }
 
-  // Load fuel prices from backend
   Future<void> _loadFuelPrices() async {
     try {
       final result = await _apiService.getFuelPrices();
@@ -186,7 +220,6 @@ class _FuelLogScreenState extends State<FuelLogScreen>
       return;
     }
 
-    // Check if vehicle has Fuel Pass
     if (_selectedVehicle.fuelPassCode == null ||
         _selectedVehicle.fuelPassCode!.isEmpty) {
       setState(() => _limitsLoaded = true);
@@ -195,7 +228,6 @@ class _FuelLogScreenState extends State<FuelLogScreen>
 
     setState(() => _limitsLoaded = false);
 
-    // Filter grades by vehicle fuel type
     final grades = _allFuelGrades.where((g) {
       if (_selectedVehicle.fuelType.toLowerCase() == 'hybrid') {
         return g.fuelType.toLowerCase() == 'petrol' ||
@@ -205,18 +237,18 @@ class _FuelLogScreenState extends State<FuelLogScreen>
           _selectedVehicle.fuelType.toLowerCase();
     }).toList();
 
-    // Get fresh quota from API
-    final quotaResult = await _apiService.getCurrentQuota(
-      _selectedVehicle.id!,
-      _selectedVehicle.type,
-    );
-
-    double remaining = 0;
-    if (quotaResult['success']) {
-      remaining = quotaResult['data']['remainingLitres']?.toDouble() ?? 0;
+    // Only fetch quota if not pre-scanned
+    double remaining = _quotaRemaining;
+    if (!_isPreScanned || _quotaRemaining == 0) {
+      final quotaResult = await _apiService.getCurrentQuota(
+        _selectedVehicle.id!,
+        _selectedVehicle.type,
+      );
+      if (quotaResult['success']) {
+        remaining = quotaResult['data']['remainingLitres']?.toDouble() ?? 0;
+      }
     }
 
-    // Get fresh wallet balance
     final walletResult = await _apiService.getWallet(widget.user.id!);
     double freshBalance = widget.walletBalance;
     if (walletResult['success']) {
@@ -231,6 +263,7 @@ class _FuelLogScreenState extends State<FuelLogScreen>
       _walletBalance = freshBalance;
       _limitsLoaded = true;
       _litresCtrl.clear();
+      _fuelAmountCtrl.clear();
     });
   }
 
@@ -238,7 +271,6 @@ class _FuelLogScreenState extends State<FuelLogScreen>
     if (!_formKey.currentState!.validate()) return;
     if (_selectedGrade == null) return;
 
-    // Double check fuel pass exists before saving
     if (_selectedVehicle.fuelPassCode == null ||
         _selectedVehicle.fuelPassCode!.isEmpty) {
       showAppSnackbar(
@@ -262,7 +294,7 @@ class _FuelLogScreenState extends State<FuelLogScreen>
       'fuelType': _selectedVehicle.fuelType,
       'fuelGrade': _selectedGrade!.name,
       'vehicleType': _selectedVehicle.type,
-      'stationName': _stationCtrl.text.trim(),
+      'stationName': '', // Empty for scanned flow
     };
 
     final result = await _apiService.addFuelLog(logData);
@@ -271,7 +303,6 @@ class _FuelLogScreenState extends State<FuelLogScreen>
     setState(() => _isSaving = false);
 
     if (result['success']) {
-      // Refresh data after successful fuel log
       await _loadFuelPrices();
       await _refreshVehicles();
 
@@ -296,13 +327,6 @@ class _FuelLogScreenState extends State<FuelLogScreen>
         message: 'Insufficient wallet balance. Top up to continue.',
         isError: true,
       );
-    } else if (result['error'].contains('Fuel Pass')) {
-      showAppSnackbar(
-        context,
-        message: 'Please generate Fuel Pass for this vehicle first.',
-        isError: true,
-      );
-      Navigator.pop(context);
     } else {
       showAppSnackbar(
         context,
@@ -312,7 +336,6 @@ class _FuelLogScreenState extends State<FuelLogScreen>
     }
   }
 
-  // Refresh vehicles from API
   Future<void> _refreshVehicles() async {
     try {
       final result = await _apiService.getVehicles(widget.user.id!);
@@ -386,7 +409,6 @@ class _FuelLogScreenState extends State<FuelLogScreen>
             opacity: _fadeAnim,
             child: Column(
               children: [
-                // Top bar
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
                   child: Row(
@@ -419,36 +441,36 @@ class _FuelLogScreenState extends State<FuelLogScreen>
                       const SizedBox(width: 14),
                       Expanded(
                         child: Text(
-                          'Log Fuel',
+                          _isPreScanned ? 'Log Fuel (Scanned)' : 'Log Fuel',
                           style: Theme.of(context).textTheme.headlineMedium,
                         ),
                       ),
-                      // Refresh button
-                      GestureDetector(
-                        onTap: _refreshVehicles,
-                        child: Container(
-                          width: 42,
-                          height: 42,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(12),
-                            color: isDark
-                                ? AppColors.darkSurfaceAlt
-                                : AppColors.lightSurfaceAlt,
-                            border: Border.all(
+                      if (!_isPreScanned)
+                        GestureDetector(
+                          onTap: _refreshVehicles,
+                          child: Container(
+                            width: 42,
+                            height: 42,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(12),
                               color: isDark
-                                  ? AppColors.darkBorder
-                                  : AppColors.lightBorder,
+                                  ? AppColors.darkSurfaceAlt
+                                  : AppColors.lightSurfaceAlt,
+                              border: Border.all(
+                                color: isDark
+                                    ? AppColors.darkBorder
+                                    : AppColors.lightBorder,
+                              ),
+                            ),
+                            child: Icon(
+                              Icons.refresh_rounded,
+                              size: 18,
+                              color: isDark
+                                  ? AppColors.darkTextSub
+                                  : AppColors.lightTextSub,
                             ),
                           ),
-                          child: Icon(
-                            Icons.refresh_rounded,
-                            size: 18,
-                            color: isDark
-                                ? AppColors.darkTextSub
-                                : AppColors.lightTextSub,
-                          ),
                         ),
-                      ),
                     ],
                   ),
                 ),
@@ -468,27 +490,29 @@ class _FuelLogScreenState extends State<FuelLogScreen>
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                // Vehicle selector
                                 _sectionLabel('Vehicle', isDark),
                                 const SizedBox(height: 8),
                                 KeyedSubtree(
                                   key: _keyVehicleSelector,
-                                  child: _dropdown<VehicleModel>(
-                                    isDark: isDark,
-                                    value: _selectedVehicle,
-                                    items: _vehicles,
-                                    itemLabel: (v) =>
-                                        '${v.shortDisplay} · ${v.registrationNo}',
-                                    onChanged: (v) async {
-                                      if (v == null) return;
-                                      setState(() => _selectedVehicle = v);
-                                      await _checkFuelPassAndLoad();
-                                    },
-                                  ),
+                                  child: _isPreScanned
+                                      ? _buildLockedVehicleTile(isDark)
+                                      : _dropdown<VehicleModel>(
+                                          isDark: isDark,
+                                          value: _selectedVehicle,
+                                          items: _vehicles,
+                                          itemLabel: (v) =>
+                                              '${v.shortDisplay} · ${v.registrationNo}',
+                                          onChanged: (v) async {
+                                            if (v == null) return;
+                                            setState(
+                                              () => _selectedVehicle = v,
+                                            );
+                                            await _checkFuelPassAndLoad();
+                                          },
+                                        ),
                                 ),
                                 const SizedBox(height: 20),
 
-                                // Fuel Pass Status Check
                                 if (!_hasFuelPass(_selectedVehicle))
                                   _buildNoFuelPassWarning(isDark)
                                 else if (!_limitsLoaded)
@@ -504,11 +528,9 @@ class _FuelLogScreenState extends State<FuelLogScreen>
                                     ),
                                   )
                                 else ...[
-                                  // Quota + wallet info bar
                                   _buildLimitsBar(isDark),
                                   const SizedBox(height: 20),
 
-                                  // Fuel grade selector
                                   if (_availableGrades.isEmpty) ...[
                                     _buildUnsupportedFuelNote(isDark),
                                   ] else ...[
@@ -520,7 +542,16 @@ class _FuelLogScreenState extends State<FuelLogScreen>
                                     ),
                                     const SizedBox(height: 20),
 
-                                    // Litres field
+                                    // Fuel Amount Field (Number Pad)
+                                    _sectionLabel('Amount (LKR)', isDark),
+                                    const SizedBox(height: 8),
+                                    KeyedSubtree(
+                                      key: _keyAmountField,
+                                      child: _buildFuelAmountField(isDark),
+                                    ),
+                                    const SizedBox(height: 20),
+
+                                    // Litres Field (Auto-calculated from amount)
                                     _sectionLabel('Litres Filled', isDark),
                                     const SizedBox(height: 8),
                                     KeyedSubtree(
@@ -529,21 +560,10 @@ class _FuelLogScreenState extends State<FuelLogScreen>
                                     ),
                                     const SizedBox(height: 20),
 
-                                    // Station name
-                                    AppTextField(
-                                      label: 'Station Name (optional)',
-                                      hint: 'e.g. CPC Colombo 7',
-                                      controller: _stationCtrl,
-                                      prefixIcon: Icons.place_outlined,
-                                    ),
-                                    const SizedBox(height: 20),
-
-                                    // Cost preview
                                     if (_totalCost > 0)
                                       _buildCostPreview(isDark),
                                     const SizedBox(height: 8),
 
-                                    // Save button
                                     KeyedSubtree(
                                       key: _keySaveButton,
                                       child: GradientButton(
@@ -575,9 +595,10 @@ class _FuelLogScreenState extends State<FuelLogScreen>
       steps: [
         TourStep(
           targetKey: _keyVehicleSelector,
-          title: 'Select Vehicle',
-          body:
-              'Choose the vehicle you refueled. Each vehicle has its own quota.',
+          title: _isPreScanned ? 'Scanned Vehicle' : 'Select Vehicle',
+          body: _isPreScanned
+              ? 'This vehicle was scanned via QR code. Proceed with fuel logging.'
+              : 'Choose the vehicle you refueled. Each vehicle has its own quota.',
           icon: Icons.directions_car_rounded,
           gradient: [AppColors.ocean, AppColors.emerald],
           position: TooltipPosition.below,
@@ -591,10 +612,19 @@ class _FuelLogScreenState extends State<FuelLogScreen>
           position: TooltipPosition.below,
         ),
         TourStep(
-          targetKey: _keyLitresField,
-          title: 'Enter Litres',
+          targetKey: _keyAmountField,
+          title: 'Enter Amount',
           body:
-              'Input the exact litres filled. Check quota and wallet limits above.',
+              'Input the amount you paid in LKR. Litres will be auto-calculated.',
+          icon: Icons.money_rounded,
+          gradient: [AppColors.amber, AppColors.emerald],
+          position: TooltipPosition.below,
+        ),
+        TourStep(
+          targetKey: _keyLitresField,
+          title: 'Litres',
+          body:
+              'Litres are auto-calculated from the amount. You can also edit manually.',
           icon: Icons.opacity_rounded,
           gradient: [AppColors.amber, AppColors.emerald],
           position: TooltipPosition.below,
@@ -613,6 +643,90 @@ class _FuelLogScreenState extends State<FuelLogScreen>
         if (mounted) setState(() => _showTour = false);
       },
       child: screen,
+    );
+  }
+
+  Widget _buildLockedVehicleTile(bool isDark) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+        border: Border.all(
+          color: AppColors.emerald.withOpacity(0.5),
+          width: 1.5,
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              gradient: const LinearGradient(
+                colors: [AppColors.emerald, AppColors.ocean],
+              ),
+            ),
+            child: const Icon(
+              Icons.qr_code_scanner_rounded,
+              color: Colors.white,
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _selectedVehicle.registrationNo.toUpperCase(),
+                  style: GoogleFonts.spaceGrotesk(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: isDark ? AppColors.darkText : AppColors.lightText,
+                  ),
+                ),
+                Text(
+                  _selectedVehicle.displayName,
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: isDark
+                        ? AppColors.darkTextSub
+                        : AppColors.lightTextSub,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              color: AppColors.emerald.withOpacity(0.1),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.verified_rounded,
+                  size: 12,
+                  color: AppColors.emerald,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  'Scanned',
+                  style: GoogleFonts.inter(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.emerald,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -725,7 +839,6 @@ class _FuelLogScreenState extends State<FuelLogScreen>
     );
   }
 
-  // ── Quota + wallet limits bar ─────────────────────────────────────────────
   Widget _buildLimitsBar(bool isDark) {
     final effectiveMax = _maxLitres;
 
@@ -804,7 +917,6 @@ class _FuelLogScreenState extends State<FuelLogScreen>
     );
   }
 
-  // ── Grade selector ────────────────────────────────────────────────────────
   Widget _buildGradeSelector(bool isDark) {
     return Wrap(
       spacing: 10,
@@ -817,6 +929,7 @@ class _FuelLogScreenState extends State<FuelLogScreen>
             setState(() {
               _selectedGrade = grade;
               _litresCtrl.clear();
+              _fuelAmountCtrl.clear();
             });
           },
           child: AnimatedContainer(
@@ -883,7 +996,41 @@ class _FuelLogScreenState extends State<FuelLogScreen>
     );
   }
 
-  // ── Litres field with live validation ─────────────────────────────────────
+  Widget _buildFuelAmountField(bool isDark) {
+    return TextFormField(
+      controller: _fuelAmountCtrl,
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      inputFormatters: [
+        FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
+      ],
+      style: Theme.of(context).textTheme.bodyLarge,
+      decoration: InputDecoration(
+        labelText: 'Amount (LKR)',
+        hintText: 'Enter amount paid',
+        prefixIcon: const Icon(Icons.currency_rupee_rounded, size: 20),
+        suffixText: 'LKR',
+        suffixStyle: GoogleFonts.spaceGrotesk(
+          fontWeight: FontWeight.w600,
+          color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
+        ),
+      ),
+      validator: (v) {
+        if (v == null || v.trim().isEmpty) {
+          return 'Amount is required';
+        }
+        final amount = double.tryParse(v.trim());
+        if (amount == null || amount <= 0) {
+          return 'Enter a valid amount';
+        }
+        final litres = amount / (_selectedGrade?.pricePerLitre ?? 1);
+        if (litres > _maxLitres + 0.001) {
+          return 'Exceeds max limit (${_maxLitres.toStringAsFixed(1)} L)';
+        }
+        return null;
+      },
+    );
+  }
+
   Widget _buildLitresField(bool isDark) {
     final max = _maxLitres;
     return Column(
@@ -908,6 +1055,15 @@ class _FuelLogScreenState extends State<FuelLogScreen>
               color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
             ),
           ),
+          onChanged: (value) {
+            // Update amount field when litres is manually edited
+            final litres = double.tryParse(value) ?? 0;
+            if (litres > 0 && _selectedGrade != null) {
+              final amount = litres * _selectedGrade!.pricePerLitre;
+              _fuelAmountCtrl.text = amount.toStringAsFixed(2);
+            }
+            setState(() {});
+          },
           validator: (v) {
             if (v == null || v.trim().isEmpty) return 'Litres is required';
             final d = double.tryParse(v.trim());
@@ -969,7 +1125,6 @@ class _FuelLogScreenState extends State<FuelLogScreen>
     );
   }
 
-  // ── Cost preview ──────────────────────────────────────────────────────────
   Widget _buildCostPreview(bool isDark) {
     final cost = _totalCost;
     final affordable = cost <= _walletBalance + 0.001;
@@ -1052,7 +1207,6 @@ class _FuelLogScreenState extends State<FuelLogScreen>
     );
   }
 
-  // ── Unsupported fuel note ─────────────────────────────────────────────────
   Widget _buildUnsupportedFuelNote(bool isDark) {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -1083,7 +1237,6 @@ class _FuelLogScreenState extends State<FuelLogScreen>
     );
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
   Color _gradeAccent(String name) {
     if (name.contains('95')) return const Color(0xFF7C3AED);
     if (name.contains('92')) return AppColors.ocean;
@@ -1149,7 +1302,6 @@ class _FuelLogScreenState extends State<FuelLogScreen>
   }
 }
 
-// Extension for gradient from list
 extension ListGradient on List<Color> {
   LinearGradient asGradient() {
     return LinearGradient(

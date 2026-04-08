@@ -185,6 +185,39 @@ class ApiService {
     }
   }
 
+  // Get user by ID - NEEDS TO BE ADDED TO BACKEND
+  Future<Map<String, dynamic>> getUserById(int userId) async {
+    try {
+      final token = await getToken();
+      if (token == null) {
+        return {'success': false, 'error': 'Not authenticated'};
+      }
+
+      final response = await http
+          .get(
+            Uri.parse('$baseUrl/auth/user/$userId'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 200) {
+        return {'success': true, 'data': data};
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to fetch user details',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
   // Get all fuel prices from backend
   Future<Map<String, dynamic>> getFuelPrices() async {
     try {

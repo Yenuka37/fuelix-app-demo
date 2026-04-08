@@ -10,6 +10,7 @@ import '../models/quota_model.dart';
 import '../services/api_service.dart';
 import '../services/quota_service.dart';
 import '../widgets/custom_button.dart';
+import 'fuel_log_screen.dart';
 
 class QrScannerScreen extends StatefulWidget {
   final UserModel? user;
@@ -36,6 +37,10 @@ class _QrScannerScreenState extends State<QrScannerScreen>
   String? _lastScannedCode;
   DateTime? _lastScanTime;
   final GlobalKey _scannerKey = GlobalKey();
+
+  // Track the active snackbar
+  ScaffoldMessengerState? _messengerState;
+  SnackBar? _activeSnackBar;
 
   @override
   void initState() {
@@ -87,6 +92,8 @@ class _QrScannerScreenState extends State<QrScannerScreen>
     WidgetsBinding.instance.removeObserver(this);
     _animationController.dispose();
     _scannerController.dispose();
+    // Close any active snackbar
+    _activeSnackBar = null;
     super.dispose();
   }
 
@@ -123,7 +130,7 @@ class _QrScannerScreenState extends State<QrScannerScreen>
         return;
       }
 
-      await _verifyPasscode(passcode);
+      await _verifyAndProceed(passcode);
     } catch (e) {
       _showError('Failed to process QR code: ${e.toString()}');
     } finally {
@@ -166,17 +173,15 @@ class _QrScannerScreenState extends State<QrScannerScreen>
         }
       }
 
-      // Handle pipe-delimited format: FUELIX|PASSCODE|REG_NO|MODEL|YEAR|FUEL_TYPE
-      // Example: FUELIX|JG1O706LPCTA|BB-1231|Suzuki Access|2020|Petrol
+      // Handle pipe-delimited format
       if (rawValue.toUpperCase().startsWith('FUELIX|')) {
         final parts = rawValue.split('|');
         if (parts.length >= 2) {
-          // Passcode is the second element (index 1)
           return parts[1];
         }
       }
 
-      // Handle comma-delimited format: FUELIX,PASSCODE,REG_NO,MODEL,YEAR,FUEL_TYPE
+      // Handle comma-delimited format
       if (rawValue.toUpperCase().startsWith('FUELIX,')) {
         final parts = rawValue.split(',');
         if (parts.length >= 2) {
@@ -184,33 +189,7 @@ class _QrScannerScreenState extends State<QrScannerScreen>
         }
       }
 
-      // Handle FUELIX prefixed formats with any delimiter
-      if (rawValue.toUpperCase().startsWith('FUELIX')) {
-        // Try to find the best delimiter
-        final delimiter = rawValue.contains('|')
-            ? '|'
-            : rawValue.contains(',')
-            ? ','
-            : null;
-
-        if (delimiter != null) {
-          final parts = rawValue.split(delimiter);
-          if (parts.length >= 2) {
-            // Remove "FUELIX" prefix from first part if present
-            String firstPart = parts[0].toUpperCase();
-            if (firstPart == 'FUELIX' || firstPart.startsWith('FUELIX')) {
-              return parts[1];
-            }
-          }
-        }
-      }
-
-      // Handle plain 12-character alphanumeric passcode
-      if (RegExp(r'^[A-Z0-9]{12}$').hasMatch(rawValue.toUpperCase())) {
-        return rawValue.toUpperCase();
-      }
-
-      // Handle plain 8-16 character alphanumeric passcode (more flexible)
+      // Handle plain alphanumeric passcode
       if (RegExp(r'^[A-Za-z0-9]{8,16}$').hasMatch(rawValue)) {
         return rawValue;
       }
@@ -222,24 +201,100 @@ class _QrScannerScreenState extends State<QrScannerScreen>
     }
   }
 
-  Future<void> _verifyPasscode(String passcode) async {
+  Future<void> _verifyAndProceed(String passcode) async {
     try {
       final result = await _apiService.verifyVehiclePasscode(passcode);
 
       if (result['success'] && mounted) {
         final vehicleData = result['data'];
 
-        final quotaResult = await _apiService.getCurrentQuota(
-          vehicleData['id'],
-          vehicleData['type'] ?? 'Car',
-        );
+        final vehicleUserId = vehicleData['userId'] as int?;
 
-        FuelQuotaModel? quota;
-        if (quotaResult['success']) {
-          quota = FuelQuotaModel.fromMap(quotaResult['data']);
+        if (vehicleUserId == null) {
+          _showError('Vehicle user information not found');
+          return;
         }
 
-        await _showVehicleDetailsDialog(vehicleData, quota);
+        final userResult = await _apiService.getUserById(vehicleUserId);
+
+        if (!userResult['success'] || mounted == false) {
+          _showError('Failed to fetch user details');
+          return;
+        }
+
+        final userData = userResult['data'];
+
+        final vehicleOwner = UserModel(
+          id: userData['id'],
+          firstName: userData['firstName']?.toString() ?? '',
+          lastName: userData['lastName']?.toString() ?? '',
+          nic: userData['nic']?.toString() ?? '',
+          mobile: userData['mobile']?.toString() ?? '',
+          addressLine1: userData['addressLine1']?.toString() ?? '',
+          addressLine2: userData['addressLine2']?.toString() ?? '',
+          addressLine3: userData['addressLine3']?.toString() ?? '',
+          district: userData['district']?.toString() ?? '',
+          province: userData['province']?.toString() ?? '',
+          postalCode: userData['postalCode']?.toString() ?? '',
+          email: userData['email']?.toString() ?? '',
+          password: '',
+          role: userData['role']?.toString(),
+          createdAt: userData['createdAt'] != null
+              ? DateTime.tryParse(userData['createdAt'].toString())
+              : null,
+        );
+
+        final vehicle = VehicleModel(
+          id: vehicleData['id'],
+          userId: vehicleUserId,
+          type: vehicleData['type']?.toString() ?? 'Car',
+          make: vehicleData['make']?.toString() ?? '',
+          model: vehicleData['model']?.toString() ?? '',
+          year: vehicleData['year']?.toString() ?? '',
+          registrationNo: vehicleData['registrationNo']?.toString() ?? '',
+          fuelType: vehicleData['fuelType']?.toString() ?? 'Petrol',
+          engineCC: vehicleData['engineCC']?.toString() ?? '',
+          color: vehicleData['color']?.toString() ?? '',
+          fuelPassCode: passcode,
+          qrGeneratedAt: vehicleData['qrGeneratedAt'] != null
+              ? DateTime.tryParse(vehicleData['qrGeneratedAt'].toString())
+              : null,
+          createdAt: vehicleData['createdAt'] != null
+              ? DateTime.tryParse(vehicleData['createdAt'].toString())
+              : null,
+        );
+
+        final quotaResult = await _apiService.getCurrentQuota(
+          vehicle.id!,
+          vehicle.type,
+        );
+
+        double remainingQuota = 0;
+        if (quotaResult['success']) {
+          remainingQuota = (quotaResult['data']['remainingLitres'] as num)
+              .toDouble();
+        }
+
+        double walletBalance = 0;
+        final walletResult = await _apiService.getWallet(vehicleUserId);
+        if (walletResult['success'] && mounted) {
+          walletBalance = (walletResult['data']['balance'] as num).toDouble();
+        }
+
+        if (!mounted) return;
+
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (context) => FuelLogScreen(
+              user: vehicleOwner,
+              vehicles: [vehicle],
+              walletBalance: walletBalance,
+              selectedVehicleId: vehicle.id,
+              preScannedQuota: remainingQuota,
+            ),
+          ),
+        );
       } else {
         _showError(result['error'] ?? 'Invalid Fuel Pass Code');
       }
@@ -248,365 +303,68 @@ class _QrScannerScreenState extends State<QrScannerScreen>
     }
   }
 
-  Future<void> _showVehicleDetailsDialog(
-    Map<String, dynamic> vehicleData,
-    FuelQuotaModel? quota,
-  ) async {
-    final registrationNo = vehicleData['registrationNo'] ?? 'N/A';
-    final vehicleType = vehicleData['type'] ?? 'Car';
-    final make = vehicleData['make'] ?? '';
-    final model = vehicleData['model'] ?? '';
-    final year = vehicleData['year'] ?? '';
-    final fuelType = vehicleData['fuelType'] ?? 'Petrol';
-    final remainingQuota = quota?.remainingLitres ?? 0.0;
-    final usedLitres = quota?.usedLitres ?? 0.0;
-    final totalQuota = quota?.quotaLitres ?? 0.0;
-    final weekStart = quota?.weekStart;
-    final weekEnd = quota?.weekEnd;
-
-    await showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: Row(
-          children: [
-            Icon(Icons.verified_rounded, color: Colors.green, size: 28),
-            const SizedBox(width: 10),
-            Text(
-              'Vehicle Verified',
-              style: GoogleFonts.spaceGrotesk(
-                fontWeight: FontWeight.w700,
-                fontSize: 20,
-              ),
-            ),
-          ],
-        ),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      AppColors.emerald,
-                      AppColors.emerald.withOpacity(0.7),
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Column(
-                  children: [
-                    Text(
-                      registrationNo.toUpperCase(),
-                      style: GoogleFonts.spaceGrotesk(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800,
-                        color: Colors.white,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '$make $model ($year)',
-                      style: GoogleFonts.spaceGrotesk(
-                        fontSize: 14,
-                        color: Colors.white70,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        vehicleType,
-                        style: GoogleFonts.spaceGrotesk(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 20),
-
-              _buildDetailRow('Fuel Type', fuelType, Icons.local_gas_station),
-              if (vehicleData['color'] != null &&
-                  vehicleData['color'].toString().isNotEmpty)
-                _buildDetailRow('Color', vehicleData['color'], Icons.palette),
-              if (vehicleData['engineCC'] != null &&
-                  vehicleData['engineCC'].toString().isNotEmpty)
-                _buildDetailRow(
-                  'Engine CC',
-                  vehicleData['engineCC'].toString(),
-                  Icons.speed,
-                ),
-
-              const Divider(height: 24),
-
-              Row(
-                children: [
-                  Icon(
-                    Icons.local_gas_station_rounded,
-                    color: AppColors.emerald,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Weekly Fuel Quota',
-                    style: GoogleFonts.spaceGrotesk(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 16,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: AppColors.emerald.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppColors.emerald.withOpacity(0.3)),
-                ),
-                child: Column(
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'Remaining',
-                          style: GoogleFonts.spaceGrotesk(
-                            fontSize: 14,
-                            color: AppColors.darkTextSub,
-                          ),
-                        ),
-                        Text(
-                          '${remainingQuota.toStringAsFixed(1)} L',
-                          style: GoogleFonts.spaceGrotesk(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                            color: remainingQuota > 0
-                                ? AppColors.emerald
-                                : AppColors.error,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    LinearProgressIndicator(
-                      value: totalQuota > 0 ? usedLitres / totalQuota : 0,
-                      backgroundColor: AppColors.emerald.withOpacity(0.2),
-                      color: remainingQuota > 0
-                          ? AppColors.emerald
-                          : AppColors.error,
-                      borderRadius: BorderRadius.circular(10),
-                      minHeight: 8,
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'Used: ${usedLitres.toStringAsFixed(1)} L',
-                          style: GoogleFonts.spaceGrotesk(
-                            fontSize: 12,
-                            color: AppColors.darkTextSub,
-                          ),
-                        ),
-                        Text(
-                          'Total: ${totalQuota.toStringAsFixed(1)} L',
-                          style: GoogleFonts.spaceGrotesk(
-                            fontSize: 12,
-                            color: AppColors.darkTextSub,
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (weekStart != null && weekEnd != null) ...[
-                      const SizedBox(height: 12),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          vertical: 8,
-                          horizontal: 12,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AppColors.ocean.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.calendar_today,
-                              size: 14,
-                              color: AppColors.ocean,
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                'Week: ${_formatDate(weekStart)} - ${_formatDate(weekEnd)}',
-                                style: GoogleFonts.spaceGrotesk(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w500,
-                                  color: AppColors.ocean,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-
-              if (remainingQuota <= 0) ...[
-                const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: AppColors.error.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.warning_rounded,
-                        color: AppColors.error,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          'Weekly quota exhausted. Please try next week.',
-                          style: GoogleFonts.spaceGrotesk(
-                            fontSize: 12,
-                            color: AppColors.error,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(
-              'Close',
-              style: GoogleFonts.spaceGrotesk(
-                color: AppColors.error,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          if (remainingQuota > 0 && widget.user != null)
-            GradientButton(
-              label: 'Proceed to Fuel',
-              onPressed: () => Navigator.pop(ctx, {
-                'vehicleId': vehicleData['id'],
-                'registrationNo': registrationNo,
-                'remainingQuota': remainingQuota,
-              }),
-            ),
-        ],
-      ),
-    ).then((result) {
-      if (result != null && mounted) {
-        Navigator.pop(context, result);
-      }
-    });
-  }
-
-  Widget _buildDetailRow(String label, String value, IconData icon) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Row(
-        children: [
-          Icon(icon, size: 18, color: AppColors.darkTextSub),
-          const SizedBox(width: 12),
-          SizedBox(
-            width: 80,
-            child: Text(
-              label,
-              style: GoogleFonts.spaceGrotesk(
-                fontSize: 14,
-                color: AppColors.darkTextSub,
-              ),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              style: GoogleFonts.spaceGrotesk(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _formatDate(DateTime date) {
-    return '${date.day}/${date.month}/${date.year}';
-  }
-
   void _showError(String message) {
     setState(() {
       _errorMessage = message;
+      _isScanning = false;
     });
 
     HapticFeedback.heavyImpact();
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: AppColors.error,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        action: SnackBarAction(
-          label: 'Scan Again',
-          textColor: Colors.white,
-          onPressed: () {
+    // Close any existing snackbar first
+    if (_activeSnackBar != null && _messengerState != null) {
+      _messengerState!.removeCurrentSnackBar();
+      _activeSnackBar = null;
+    }
+
+    // Store messenger state
+    _messengerState = ScaffoldMessenger.of(context);
+
+    // Create the snackbar
+    final snackBar = SnackBar(
+      content: Text(message),
+      backgroundColor: AppColors.error,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      duration: const Duration(seconds: 3),
+      action: SnackBarAction(
+        label: 'Scan Again',
+        textColor: Colors.white,
+        onPressed: () {
+          // Dismiss the snackbar first
+          if (_messengerState != null) {
+            _messengerState!.removeCurrentSnackBar();
+            _activeSnackBar = null;
+          }
+          // Reset scanning state
+          if (mounted) {
             setState(() {
               _isScanning = true;
               _errorMessage = null;
             });
             _scannerController.start();
-          },
-        ),
+          }
+        },
       ),
     );
 
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted && _errorMessage != null) {
-        setState(() {
-          _errorMessage = null;
-          _isScanning = true;
-        });
-        _scannerController.start();
+    _activeSnackBar = snackBar;
+    _messengerState!.showSnackBar(snackBar).closed.then((reason) {
+      // Snackbar closed, clear reference
+      if (mounted && _activeSnackBar == snackBar) {
+        _activeSnackBar = null;
       }
     });
+  }
+
+  void _resetScanner() {
+    if (mounted) {
+      setState(() {
+        _isScanning = true;
+        _errorMessage = null;
+      });
+      _scannerController.start();
+    }
   }
 
   void _toggleTorch() {
@@ -709,12 +467,7 @@ class _QrScannerScreenState extends State<QrScannerScreen>
                       const SizedBox(height: 20),
                       GradientButton(
                         label: 'Retry',
-                        onPressed: () {
-                          _scannerController.start();
-                          setState(() {
-                            _isScanning = true;
-                          });
-                        },
+                        onPressed: _resetScanner,
                         height: 45,
                       ),
                     ],
