@@ -202,6 +202,22 @@ class _FuelPassSheetState extends State<FuelPassSheet> {
     }
   }
 
+  String _generateQRData() {
+    // Format: FUELIX|PASSCODE|REG_NO|MAKE MODEL|YEAR|FUEL_TYPE|VEHICLE_ID|TIMESTAMP
+    final passcode = widget.vehicle.fuelPassCode ?? '';
+    final regNo = widget.vehicle.registrationNo;
+    final vehicleName = '${widget.vehicle.make} ${widget.vehicle.model}';
+    final year = widget.vehicle.year;
+    final fuelType = widget.vehicle.fuelType;
+    final vehicleId = widget.vehicle.id ?? '';
+    final timestamp =
+        widget.vehicle.qrGeneratedAt?.toIso8601String() ??
+        DateTime.now().toIso8601String();
+
+    // Create a comprehensive QR code data string
+    return 'FUELIX|$passcode|$regNo|$vehicleName|$year|$fuelType|$vehicleId|$timestamp';
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -210,10 +226,8 @@ class _FuelPassSheetState extends State<FuelPassSheet> {
     // Get the decrypted Fuel Pass Code from the vehicle model
     final code = widget.vehicle.fuelPassCode ?? '';
 
-    // QR data uses the decrypted code
-    final qrData =
-        'FUELIX|${widget.vehicle.fuelPassCode}|${widget.vehicle.registrationNo}|'
-        '${widget.vehicle.make} ${widget.vehicle.model}|${widget.vehicle.year}|${widget.vehicle.fuelType}';
+    // Generate the QR data using the comprehensive format
+    final qrData = _generateQRData();
 
     return Container(
       decoration: BoxDecoration(

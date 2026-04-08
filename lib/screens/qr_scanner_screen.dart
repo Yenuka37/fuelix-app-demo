@@ -5,10 +5,8 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import '../models/user_model.dart';
-import '../models/vehicle_model.dart';
 import '../models/quota_model.dart';
 import '../services/api_service.dart';
-import '../services/quota_service.dart';
 import '../widgets/custom_button.dart';
 
 class QrScannerScreen extends StatefulWidget {
@@ -123,8 +121,10 @@ class _QrScannerScreenState extends State<QrScannerScreen>
         return;
       }
 
+      debugPrint('Extracted passcode: $passcode');
       await _verifyPasscode(passcode);
     } catch (e) {
+      debugPrint('Error in _handleBarcode: $e');
       _showError('Failed to process QR code: ${e.toString()}');
     } finally {
       if (mounted) {
@@ -138,6 +138,30 @@ class _QrScannerScreenState extends State<QrScannerScreen>
 
   String? _extractPasscode(String rawValue) {
     try {
+      debugPrint('Raw QR value: $rawValue');
+
+      // Handle pipe-delimited format: FUELIX|PASSCODE|REG_NO|MODEL|YEAR|FUEL_TYPE
+      // Example: FUELIX|JG1O706LPCTA|BB-1231|Suzuki Access|2020|Petrol
+      if (rawValue.toUpperCase().startsWith('FUELIX|')) {
+        final parts = rawValue.split('|');
+        if (parts.length >= 2) {
+          final passcode = parts[1];
+          debugPrint('Extracted from pipe format: $passcode');
+          return passcode;
+        }
+      }
+
+      // Handle comma-delimited format: FUELIX,PASSCODE,REG_NO,MODEL,YEAR,FUEL_TYPE
+      if (rawValue.toUpperCase().startsWith('FUELIX,')) {
+        final parts = rawValue.split(',');
+        if (parts.length >= 2) {
+          final passcode = parts[1];
+          debugPrint('Extracted from comma format: $passcode');
+          return passcode;
+        }
+      }
+
+      // Handle JSON format
       if (rawValue.startsWith('{') && rawValue.endsWith('}')) {
         final decoded = jsonDecode(rawValue);
         if (decoded is Map<String, dynamic>) {
@@ -153,7 +177,8 @@ class _QrScannerScreenState extends State<QrScannerScreen>
         }
       }
 
-      if (rawValue.startsWith('fuelix://')) {
+      // Handle fuelix:// URI format
+      if (rawValue.toLowerCase().startsWith('fuelix://')) {
         final uri = Uri.parse(rawValue);
         final queryParams = uri.queryParameters;
         if (queryParams.containsKey('code')) {
@@ -164,30 +189,51 @@ class _QrScannerScreenState extends State<QrScannerScreen>
         }
       }
 
-      if (RegExp(r'^[A-Z0-9]{12}$').hasMatch(rawValue)) {
-        return rawValue;
+      // Handle plain passcode (12 characters alphanumeric)
+      if (RegExp(r'^[A-Z0-9]{12}$', caseSensitive: false).hasMatch(rawValue)) {
+        debugPrint('Extracted as plain passcode: $rawValue');
+        return rawValue.toUpperCase();
       }
 
+      debugPrint('Could not extract passcode from: $rawValue');
       return null;
     } catch (e) {
+      debugPrint('Error extracting passcode: $e');
       return null;
     }
   }
 
   Future<void> _verifyPasscode(String passcode) async {
     try {
+      debugPrint('Verifying passcode with backend: $passcode');
+
       final result = await _apiService.verifyVehiclePasscode(passcode);
 
-      if (result['success'] && mounted) {
-        final vehicleData = result['data'];
+      debugPrint('API Response: $result');
 
+      if (result['success'] && mounted) {
+        final vehicleData = result['data'] as Map<String, dynamic>;
+        debugPrint('Vehicle data received: $vehicleData');
+
+        // Get vehicle ID safely
+        final vehicleId = _getIntValue(vehicleData, 'id');
+        if (vehicleId == null) {
+          _showError('Invalid vehicle data received');
+          return;
+        }
+
+        final vehicleType = vehicleData['type']?.toString() ?? 'Car';
+
+        // Get quota information
         final quotaResult = await _apiService.getCurrentQuota(
-          vehicleData['id'],
-          vehicleData['type'] ?? 'Car',
+          vehicleId,
+          vehicleType,
         );
 
+        debugPrint('Quota response: $quotaResult');
+
         FuelQuotaModel? quota;
-        if (quotaResult['success']) {
+        if (quotaResult['success'] && quotaResult['data'] != null) {
           quota = FuelQuotaModel.fromMap(quotaResult['data']);
         }
 
@@ -196,25 +242,37 @@ class _QrScannerScreenState extends State<QrScannerScreen>
         _showError(result['error'] ?? 'Invalid Fuel Pass Code');
       }
     } catch (e) {
+      debugPrint('Error in _verifyPasscode: $e');
       _showError('Failed to verify passcode: ${e.toString()}');
     }
+  }
+
+  int? _getIntValue(Map<String, dynamic> map, String key) {
+    final value = map[key];
+    if (value == null) return null;
+    if (value is int) return value;
+    if (value is String) return int.tryParse(value);
+    if (value is double) return value.toInt();
+    if (value is num) return value.toInt();
+    return null;
   }
 
   Future<void> _showVehicleDetailsDialog(
     Map<String, dynamic> vehicleData,
     FuelQuotaModel? quota,
   ) async {
-    final registrationNo = vehicleData['registrationNo'] ?? 'N/A';
-    final vehicleType = vehicleData['type'] ?? 'Car';
-    final make = vehicleData['make'] ?? '';
-    final model = vehicleData['model'] ?? '';
-    final year = vehicleData['year'] ?? '';
-    final fuelType = vehicleData['fuelType'] ?? 'Petrol';
+    final registrationNo = vehicleData['registrationNo']?.toString() ?? 'N/A';
+    final vehicleType = vehicleData['type']?.toString() ?? 'Car';
+    final make = vehicleData['make']?.toString() ?? '';
+    final model = vehicleData['model']?.toString() ?? '';
+    final year = vehicleData['year']?.toString() ?? '';
+    final fuelType = vehicleData['fuelType']?.toString() ?? 'Petrol';
     final remainingQuota = quota?.remainingLitres ?? 0.0;
     final usedLitres = quota?.usedLitres ?? 0.0;
     final totalQuota = quota?.quotaLitres ?? 0.0;
     final weekStart = quota?.weekStart;
     final weekEnd = quota?.weekEnd;
+    final vehicleId = _getIntValue(vehicleData, 'id');
 
     await showDialog(
       context: context,
@@ -298,7 +356,11 @@ class _QrScannerScreenState extends State<QrScannerScreen>
               _buildDetailRow('Fuel Type', fuelType, Icons.local_gas_station),
               if (vehicleData['color'] != null &&
                   vehicleData['color'].toString().isNotEmpty)
-                _buildDetailRow('Color', vehicleData['color'], Icons.palette),
+                _buildDetailRow(
+                  'Color',
+                  vehicleData['color'].toString(),
+                  Icons.palette,
+                ),
               if (vehicleData['engineCC'] != null &&
                   vehicleData['engineCC'].toString().isNotEmpty)
                 _buildDetailRow(
@@ -461,23 +523,28 @@ class _QrScannerScreenState extends State<QrScannerScreen>
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _resetScanner();
+            },
             child: Text(
-              'Close',
+              'Scan Again',
               style: GoogleFonts.spaceGrotesk(
                 color: AppColors.error,
                 fontWeight: FontWeight.w600,
               ),
             ),
           ),
-          if (remainingQuota > 0 && widget.user != null)
+          if (remainingQuota > 0 && widget.user != null && vehicleId != null)
             GradientButton(
               label: 'Proceed to Fuel',
-              onPressed: () => Navigator.pop(ctx, {
-                'vehicleId': vehicleData['id'],
-                'registrationNo': registrationNo,
-                'remainingQuota': remainingQuota,
-              }),
+              onPressed: () {
+                Navigator.pop(ctx, {
+                  'vehicleId': vehicleId,
+                  'registrationNo': registrationNo,
+                  'remainingQuota': remainingQuota,
+                });
+              },
             ),
         ],
       ),
@@ -486,6 +553,14 @@ class _QrScannerScreenState extends State<QrScannerScreen>
         Navigator.pop(context, result);
       }
     });
+  }
+
+  void _resetScanner() {
+    setState(() {
+      _isScanning = true;
+      _errorMessage = null;
+    });
+    _scannerController.start();
   }
 
   Widget _buildDetailRow(String label, String value, IconData icon) {
@@ -539,26 +614,10 @@ class _QrScannerScreenState extends State<QrScannerScreen>
         action: SnackBarAction(
           label: 'Scan Again',
           textColor: Colors.white,
-          onPressed: () {
-            setState(() {
-              _isScanning = true;
-              _errorMessage = null;
-            });
-            _scannerController.start();
-          },
+          onPressed: _resetScanner,
         ),
       ),
     );
-
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted && _errorMessage != null) {
-        setState(() {
-          _errorMessage = null;
-          _isScanning = true;
-        });
-        _scannerController.start();
-      }
-    });
   }
 
   void _toggleTorch() {
@@ -614,11 +673,6 @@ class _QrScannerScreenState extends State<QrScannerScreen>
             onPressed: _switchCamera,
             icon: const Icon(Icons.cameraswitch_rounded),
             tooltip: 'Switch Camera',
-          ),
-          IconButton(
-            onPressed: _showScannerInfo,
-            icon: const Icon(Icons.info_outline_rounded),
-            tooltip: 'Scanner Info',
           ),
         ],
       ),
@@ -802,111 +856,6 @@ class _QrScannerScreenState extends State<QrScannerScreen>
                   ),
                 ],
               ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showScannerInfo() {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => Container(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  Icons.qr_code_scanner_rounded,
-                  color: AppColors.emerald,
-                  size: 28,
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  'Fuel Pass Scanner',
-                  style: GoogleFonts.spaceGrotesk(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-            _buildFeatureItem(
-              Icons.verified_rounded,
-              'Passcode Verification',
-              'Validates the vehicle\'s unique Fuel Pass code',
-            ),
-            _buildFeatureItem(
-              Icons.local_gas_station_rounded,
-              'Quota Check',
-              'Shows available weekly fuel quota',
-            ),
-            _buildFeatureItem(
-              Icons.directions_car_rounded,
-              'Vehicle Details',
-              'Displays registration and vehicle information',
-            ),
-            _buildFeatureItem(
-              Icons.flashlight_on_rounded,
-              'Torch Support',
-              'Scan in low light conditions',
-            ),
-            const SizedBox(height: 20),
-            GradientButton(
-              label: 'Got it',
-              onPressed: () => Navigator.pop(ctx),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildFeatureItem(IconData icon, String title, String description) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: AppColors.emerald.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(icon, color: AppColors.emerald, size: 20),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: GoogleFonts.spaceGrotesk(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  description,
-                  style: GoogleFonts.inter(
-                    fontSize: 12,
-                    color: Theme.of(context).brightness == Brightness.dark
-                        ? AppColors.darkTextSub
-                        : AppColors.lightTextSub,
-                  ),
-                ),
-              ],
             ),
           ),
         ],
