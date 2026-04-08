@@ -14,6 +14,7 @@ class UserModel {
   // Account
   final String email;
   final String password;
+  final String? role; // User role: CLIENT, STAFF, ADMIN
   final DateTime? createdAt;
 
   UserModel({
@@ -30,6 +31,7 @@ class UserModel {
     required this.postalCode,
     required this.email,
     required this.password,
+    this.role,
     this.createdAt,
   });
 
@@ -48,6 +50,7 @@ class UserModel {
       'postal_code': postalCode,
       'email': email,
       'password': password,
+      'role': role,
       'created_at':
           createdAt?.toIso8601String() ?? DateTime.now().toIso8601String(),
     };
@@ -68,6 +71,7 @@ class UserModel {
       postalCode: map['postal_code'] as String? ?? '',
       email: map['email'] as String,
       password: map['password'] as String,
+      role: map['role'] as String?,
       createdAt: map['created_at'] != null
           ? DateTime.tryParse(map['created_at'] as String)
           : null,
@@ -88,6 +92,7 @@ class UserModel {
     String? postalCode,
     String? email,
     String? password,
+    String? role,
     DateTime? createdAt,
   }) {
     return UserModel(
@@ -104,6 +109,7 @@ class UserModel {
       postalCode: postalCode ?? this.postalCode,
       email: email ?? this.email,
       password: password ?? this.password,
+      role: role ?? this.role,
       createdAt: createdAt ?? this.createdAt,
     );
   }
@@ -121,7 +127,17 @@ class UserModel {
     return parts.join(', ');
   }
 
+  /// Check if user has staff role (includes ADMIN and STAFF)
+  bool get isStaff =>
+      role?.toUpperCase() == 'STAFF' || role?.toUpperCase() == 'ADMIN';
+
+  /// Check if user is admin
+  bool get isAdmin => role?.toUpperCase() == 'ADMIN';
+
+  /// Check if user is client (regular user)
+  bool get isClient => role?.toUpperCase() == 'CLIENT' || role == null;
+
   @override
   String toString() =>
-      'UserModel(id: $id, fullName: $fullName, nic: $nic, mobile: $mobile, email: $email)';
+      'UserModel(id: $id, fullName: $fullName, nic: $nic, mobile: $mobile, email: $email, role: $role)';
 }
