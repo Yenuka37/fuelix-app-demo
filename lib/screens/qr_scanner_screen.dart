@@ -6,7 +6,9 @@ import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import '../models/user_model.dart';
 import '../models/vehicle_model.dart';
+import '../models/quota_model.dart';
 import '../services/api_service.dart';
+import '../services/quota_service.dart';
 import '../widgets/custom_button.dart';
 
 class QrScannerScreen extends StatefulWidget {
@@ -28,7 +30,6 @@ class _QrScannerScreenState extends State<QrScannerScreen>
   late Animation<double> _scanLineAnimation;
   final ApiService _apiService = ApiService();
 
-  // Features
   bool _isTorchOn = false;
   CameraFacing _cameraFacing = CameraFacing.back;
   bool _isAnalyzing = false;
@@ -67,7 +68,6 @@ class _QrScannerScreenState extends State<QrScannerScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (!mounted) return;
-
     switch (state) {
       case AppLifecycleState.resumed:
         _scannerController.start();
@@ -98,7 +98,6 @@ class _QrScannerScreenState extends State<QrScannerScreen>
 
     if (rawValue == null || rawValue.isEmpty) return;
 
-    // Prevent duplicate scans within 2 seconds
     if (_lastScannedCode == rawValue &&
         _lastScanTime != null &&
         DateTime.now().difference(_lastScanTime!) <
@@ -115,17 +114,16 @@ class _QrScannerScreenState extends State<QrScannerScreen>
     });
 
     try {
-      // Haptic feedback for better UX
       await HapticFeedback.mediumImpact();
 
-      final qrData = _parseQrData(rawValue);
+      final passcode = _extractPasscode(rawValue);
 
-      if (qrData == null) {
+      if (passcode == null) {
         _showError('Invalid QR code format');
         return;
       }
 
-      await _processQrData(qrData);
+      await _verifyPasscode(passcode);
     } catch (e) {
       _showError('Failed to process QR code: ${e.toString()}');
     } finally {
@@ -138,35 +136,36 @@ class _QrScannerScreenState extends State<QrScannerScreen>
     }
   }
 
-  Map<String, dynamic>? _parseQrData(String rawValue) {
+  String? _extractPasscode(String rawValue) {
     try {
       if (rawValue.startsWith('{') && rawValue.endsWith('}')) {
-        try {
-          final decoded = jsonDecode(rawValue);
-          if (decoded is Map<String, dynamic>) {
-            return decoded;
+        final decoded = jsonDecode(rawValue);
+        if (decoded is Map<String, dynamic>) {
+          if (decoded.containsKey('passcode')) {
+            return decoded['passcode'].toString();
           }
-        } catch (e) {
-          // Not JSON, continue
+          if (decoded.containsKey('fuelPassCode')) {
+            return decoded['fuelPassCode'].toString();
+          }
+          if (decoded.containsKey('code')) {
+            return decoded['code'].toString();
+          }
         }
       }
 
       if (rawValue.startsWith('fuelix://')) {
         final uri = Uri.parse(rawValue);
-        final pathSegments = uri.pathSegments;
-
-        if (pathSegments.isNotEmpty) {
-          final type = pathSegments[0];
-          if (type == 'vehicle' && pathSegments.length > 1) {
-            return {'type': 'vehicle', 'vehicleId': pathSegments[1]};
-          } else if (type == 'station' && pathSegments.length > 1) {
-            return {'type': 'station', 'stationId': pathSegments[1]};
-          }
+        final queryParams = uri.queryParameters;
+        if (queryParams.containsKey('code')) {
+          return queryParams['code'];
+        }
+        if (queryParams.containsKey('passcode')) {
+          return queryParams['passcode'];
         }
       }
 
-      if (RegExp(r'^[0-9a-fA-F-]{36}$').hasMatch(rawValue)) {
-        return {'type': 'vehicle', 'vehicleId': rawValue};
+      if (RegExp(r'^[A-Z0-9]{12}$').hasMatch(rawValue)) {
+        return rawValue;
       }
 
       return null;
@@ -175,87 +174,59 @@ class _QrScannerScreenState extends State<QrScannerScreen>
     }
   }
 
-  Future<void> _processQrData(Map<String, dynamic> qrData) async {
-    final type = qrData['type'];
-
-    switch (type) {
-      case 'vehicle':
-        await _handleVehicleQr(qrData['vehicleId']);
-        break;
-      case 'station':
-        await _handleStationQr(qrData['stationId']);
-        break;
-      default:
-        _showError('Unknown QR code type');
-    }
-  }
-
-  Future<void> _handleVehicleQr(String vehicleId) async {
+  Future<void> _verifyPasscode(String passcode) async {
     try {
-      final result = await _apiService.getVehicleDetails(vehicleId);
+      final result = await _apiService.verifyVehiclePasscode(passcode);
 
       if (result['success'] && mounted) {
         final vehicleData = result['data'];
-        final vehicle = VehicleModel(
-          id: vehicleData['id'],
-          userId: vehicleData['userId'],
-          type: vehicleData['type'] ?? '',
-          make: vehicleData['make'] ?? '',
-          model: vehicleData['model'] ?? '',
-          year: vehicleData['year'] ?? 0,
-          registrationNo: vehicleData['registrationNo'] ?? '',
-          fuelType: vehicleData['fuelType'] ?? '',
-          engineCC: vehicleData['engineCC']?.toString() ?? '',
-          color: vehicleData['color'] ?? '',
-          fuelPassCode: vehicleData['fuelPassCode'],
-          qrGeneratedAt: vehicleData['qrGeneratedAt'] != null
-              ? DateTime.tryParse(vehicleData['qrGeneratedAt'])
-              : null,
-          createdAt: vehicleData['createdAt'] != null
-              ? DateTime.tryParse(vehicleData['createdAt'])
-              : null,
+
+        final quotaResult = await _apiService.getCurrentQuota(
+          vehicleData['id'],
+          vehicleData['type'] ?? 'Car',
         );
 
-        await _showVehicleInfoDialog(vehicle);
+        FuelQuotaModel? quota;
+        if (quotaResult['success']) {
+          quota = FuelQuotaModel.fromMap(quotaResult['data']);
+        }
+
+        await _showVehicleDetailsDialog(vehicleData, quota);
       } else {
-        _showError('Vehicle not found');
+        _showError(result['error'] ?? 'Invalid Fuel Pass Code');
       }
     } catch (e) {
-      _showError('Failed to fetch vehicle details');
+      _showError('Failed to verify passcode: ${e.toString()}');
     }
   }
 
-  Future<void> _handleStationQr(String stationId) async {
-    try {
-      final result = await _apiService.getFuelStationDetails(stationId);
+  Future<void> _showVehicleDetailsDialog(
+    Map<String, dynamic> vehicleData,
+    FuelQuotaModel? quota,
+  ) async {
+    final registrationNo = vehicleData['registrationNo'] ?? 'N/A';
+    final vehicleType = vehicleData['type'] ?? 'Car';
+    final make = vehicleData['make'] ?? '';
+    final model = vehicleData['model'] ?? '';
+    final year = vehicleData['year'] ?? '';
+    final fuelType = vehicleData['fuelType'] ?? 'Petrol';
+    final remainingQuota = quota?.remainingLitres ?? 0.0;
+    final usedLitres = quota?.usedLitres ?? 0.0;
+    final totalQuota = quota?.quotaLitres ?? 0.0;
+    final weekStart = quota?.weekStart;
+    final weekEnd = quota?.weekEnd;
 
-      if (result['success'] && mounted) {
-        final stationData = result['data'];
-        await _showStationInfoDialog(stationData);
-      } else {
-        _showError('Fuel station not found');
-      }
-    } catch (e) {
-      _showError('Failed to fetch station details');
-    }
-  }
-
-  Future<void> _showVehicleInfoDialog(VehicleModel vehicle) async {
-    final result = await showDialog<bool>(
+    await showDialog(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         title: Row(
           children: [
-            Icon(
-              Icons.directions_car_rounded,
-              color: AppColors.emerald,
-              size: 28,
-            ),
+            Icon(Icons.verified_rounded, color: Colors.green, size: 28),
             const SizedBox(width: 10),
             Text(
-              'Vehicle Details',
+              'Vehicle Verified',
               style: GoogleFonts.spaceGrotesk(
                 fontWeight: FontWeight.w700,
                 fontSize: 20,
@@ -263,160 +234,230 @@ class _QrScannerScreenState extends State<QrScannerScreen>
             ),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildInfoRow('Registration', vehicle.registrationNo),
-            const SizedBox(height: 12),
-            _buildInfoRow('Make', vehicle.make),
-            const SizedBox(height: 12),
-            _buildInfoRow('Model', vehicle.model),
-            const SizedBox(height: 12),
-            _buildInfoRow('Year', vehicle.year.toString()),
-            const SizedBox(height: 12),
-            _buildInfoRow('Fuel Type', vehicle.fuelType),
-            if (vehicle.color.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              _buildInfoRow('Color', vehicle.color),
-            ],
-            if (vehicle.engineCC.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              _buildInfoRow('Engine CC', vehicle.engineCC),
-            ],
-            const SizedBox(height: 20),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppColors.emerald.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.emerald.withOpacity(0.3)),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.info_outline_rounded,
-                    color: AppColors.emerald,
-                    size: 20,
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      AppColors.emerald,
+                      AppColors.emerald.withOpacity(0.7),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'This vehicle is registered with Fuelix',
-                      style: GoogleFonts.spaceGrotesk(
-                        fontSize: 13,
-                        color: AppColors.emerald,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(
-              'Close',
-              style: GoogleFonts.spaceGrotesk(
-                color: AppColors.error,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          if (widget.user != null)
-            GradientButton(
-              label: 'Log Fuel',
-              onPressed: () => Navigator.pop(ctx, true),
-            ),
-        ],
-      ),
-    );
-
-    if (result == true && mounted) {
-      Navigator.pop(context, true);
-    }
-  }
-
-  Future<void> _showStationInfoDialog(Map<String, dynamic> station) async {
-    await showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Row(
-          children: [
-            Icon(
-              Icons.local_gas_station_rounded,
-              color: AppColors.emerald,
-              size: 28,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                station['name'] ?? 'Fuel Station',
-                style: GoogleFonts.spaceGrotesk(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 18,
+                  borderRadius: BorderRadius.circular(16),
                 ),
-                overflow: TextOverflow.ellipsis,
+                child: Column(
+                  children: [
+                    Text(
+                      registrationNo.toUpperCase(),
+                      style: GoogleFonts.spaceGrotesk(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '$make $model ($year)',
+                      style: GoogleFonts.spaceGrotesk(
+                        fontSize: 14,
+                        color: Colors.white70,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        vehicleType,
+                        style: GoogleFonts.spaceGrotesk(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (station['address'] != null)
-              _buildInfoRow('Address', station['address']),
-            if (station['city'] != null) ...[
-              const SizedBox(height: 12),
-              _buildInfoRow('City', station['city']),
-            ],
-            if (station['fuelTypes'] != null) ...[
-              const SizedBox(height: 12),
-              _buildInfoRow('Fuel Types', station['fuelTypes']),
-            ],
-            if (station['openingHours'] != null) ...[
-              const SizedBox(height: 12),
-              _buildInfoRow('Hours', station['openingHours']),
-            ],
-            if (station['contactNumber'] != null) ...[
-              const SizedBox(height: 12),
-              _buildInfoRow('Contact', station['contactNumber']),
-            ],
-            const SizedBox(height: 20),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppColors.emerald.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.emerald.withOpacity(0.3)),
-              ),
-              child: Row(
+              const SizedBox(height: 20),
+
+              _buildDetailRow('Fuel Type', fuelType, Icons.local_gas_station),
+              if (vehicleData['color'] != null &&
+                  vehicleData['color'].toString().isNotEmpty)
+                _buildDetailRow('Color', vehicleData['color'], Icons.palette),
+              if (vehicleData['engineCC'] != null &&
+                  vehicleData['engineCC'].toString().isNotEmpty)
+                _buildDetailRow(
+                  'Engine CC',
+                  vehicleData['engineCC'].toString(),
+                  Icons.speed,
+                ),
+
+              const Divider(height: 24),
+
+              Row(
                 children: [
                   Icon(
-                    Icons.qr_code_scanner_rounded,
+                    Icons.local_gas_station_rounded,
                     color: AppColors.emerald,
                     size: 20,
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Scan this QR at the station to log your fuel purchase',
-                      style: GoogleFonts.spaceGrotesk(
-                        fontSize: 13,
-                        color: AppColors.emerald,
-                        fontWeight: FontWeight.w500,
-                      ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Weekly Fuel Quota',
+                    style: GoogleFonts.spaceGrotesk(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
                     ),
                   ),
                 ],
               ),
-            ),
-          ],
+              const SizedBox(height: 12),
+
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppColors.emerald.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.emerald.withOpacity(0.3)),
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Remaining',
+                          style: GoogleFonts.spaceGrotesk(
+                            fontSize: 14,
+                            color: AppColors.darkTextSub,
+                          ),
+                        ),
+                        Text(
+                          '${remainingQuota.toStringAsFixed(1)} L',
+                          style: GoogleFonts.spaceGrotesk(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            color: remainingQuota > 0
+                                ? AppColors.emerald
+                                : AppColors.error,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    LinearProgressIndicator(
+                      value: totalQuota > 0 ? usedLitres / totalQuota : 0,
+                      backgroundColor: AppColors.emerald.withOpacity(0.2),
+                      color: remainingQuota > 0
+                          ? AppColors.emerald
+                          : AppColors.error,
+                      borderRadius: BorderRadius.circular(10),
+                      minHeight: 8,
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Used: ${usedLitres.toStringAsFixed(1)} L',
+                          style: GoogleFonts.spaceGrotesk(
+                            fontSize: 12,
+                            color: AppColors.darkTextSub,
+                          ),
+                        ),
+                        Text(
+                          'Total: ${totalQuota.toStringAsFixed(1)} L',
+                          style: GoogleFonts.spaceGrotesk(
+                            fontSize: 12,
+                            color: AppColors.darkTextSub,
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (weekStart != null && weekEnd != null) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 8,
+                          horizontal: 12,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.ocean.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.calendar_today,
+                              size: 14,
+                              color: AppColors.ocean,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Week: ${_formatDate(weekStart)} - ${_formatDate(weekEnd)}',
+                                style: GoogleFonts.spaceGrotesk(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w500,
+                                  color: AppColors.ocean,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+
+              if (remainingQuota <= 0) ...[
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppColors.error.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.warning_rounded,
+                        color: AppColors.error,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Weekly quota exhausted. Please try next week.',
+                          style: GoogleFonts.spaceGrotesk(
+                            fontSize: 12,
+                            color: AppColors.error,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -429,39 +470,57 @@ class _QrScannerScreenState extends State<QrScannerScreen>
               ),
             ),
           ),
+          if (remainingQuota > 0 && widget.user != null)
+            GradientButton(
+              label: 'Proceed to Fuel',
+              onPressed: () => Navigator.pop(ctx, {
+                'vehicleId': vehicleData['id'],
+                'registrationNo': registrationNo,
+                'remainingQuota': remainingQuota,
+              }),
+            ),
+        ],
+      ),
+    ).then((result) {
+      if (result != null && mounted) {
+        Navigator.pop(context, result);
+      }
+    });
+  }
+
+  Widget _buildDetailRow(String label, String value, IconData icon) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: AppColors.darkTextSub),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 80,
+            child: Text(
+              label,
+              style: GoogleFonts.spaceGrotesk(
+                fontSize: 14,
+                color: AppColors.darkTextSub,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: GoogleFonts.spaceGrotesk(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildInfoRow(String label, String value) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          width: 90,
-          child: Text(
-            '$label:',
-            style: GoogleFonts.spaceGrotesk(
-              fontWeight: FontWeight.w600,
-              fontSize: 14,
-              color: Theme.of(context).brightness == Brightness.dark
-                  ? AppColors.darkTextSub
-                  : AppColors.lightTextSub,
-            ),
-          ),
-        ),
-        Expanded(
-          child: Text(
-            value,
-            style: GoogleFonts.spaceGrotesk(
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ),
-      ],
-    );
+  String _formatDate(DateTime date) {
+    return '${date.day}/${date.month}/${date.year}';
   }
 
   void _showError(String message) {
@@ -478,13 +537,14 @@ class _QrScannerScreenState extends State<QrScannerScreen>
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         action: SnackBarAction(
-          label: 'Retry',
+          label: 'Scan Again',
           textColor: Colors.white,
           onPressed: () {
             setState(() {
               _isScanning = true;
               _errorMessage = null;
             });
+            _scannerController.start();
           },
         ),
       ),
@@ -496,6 +556,7 @@ class _QrScannerScreenState extends State<QrScannerScreen>
           _errorMessage = null;
           _isScanning = true;
         });
+        _scannerController.start();
       }
     });
   }
@@ -528,7 +589,7 @@ class _QrScannerScreenState extends State<QrScannerScreen>
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          'QR Scanner',
+          'Scan Fuel Pass',
           style: GoogleFonts.spaceGrotesk(
             fontWeight: FontWeight.w700,
             fontSize: 20,
@@ -539,7 +600,6 @@ class _QrScannerScreenState extends State<QrScannerScreen>
         foregroundColor: isDark ? Colors.white : Colors.black,
         elevation: 0,
         actions: [
-          // Torch button
           IconButton(
             onPressed: _toggleTorch,
             icon: Icon(
@@ -550,13 +610,11 @@ class _QrScannerScreenState extends State<QrScannerScreen>
             ),
             tooltip: _isTorchOn ? 'Turn off torch' : 'Turn on torch',
           ),
-          // Switch camera button
           IconButton(
             onPressed: _switchCamera,
             icon: const Icon(Icons.cameraswitch_rounded),
             tooltip: 'Switch Camera',
           ),
-          // Info button
           IconButton(
             onPressed: _showScannerInfo,
             icon: const Icon(Icons.info_outline_rounded),
@@ -566,7 +624,6 @@ class _QrScannerScreenState extends State<QrScannerScreen>
       ),
       body: Stack(
         children: [
-          // Camera preview - full screen
           MobileScanner(
             key: _scannerKey,
             controller: _scannerController,
@@ -619,7 +676,6 @@ class _QrScannerScreenState extends State<QrScannerScreen>
             },
           ),
 
-          // Scanner overlay with transparent center
           CustomPaint(
             painter: ScannerOverlayPainter(
               scanAreaRect: Rect.fromLTWH(
@@ -632,7 +688,6 @@ class _QrScannerScreenState extends State<QrScannerScreen>
             child: Container(width: double.infinity, height: double.infinity),
           ),
 
-          // Scanning line animation
           if (_isScanning && !_isProcessing)
             AnimatedBuilder(
               animation: _scanLineAnimation,
@@ -660,7 +715,6 @@ class _QrScannerScreenState extends State<QrScannerScreen>
               },
             ),
 
-          // Processing indicator
           if (_isProcessing)
             Container(
               color: Colors.black.withOpacity(0.7),
@@ -675,7 +729,7 @@ class _QrScannerScreenState extends State<QrScannerScreen>
                     ),
                     SizedBox(height: 20),
                     Text(
-                      'Processing QR Code...',
+                      'Verifying Fuel Pass...',
                       style: TextStyle(color: Colors.white, fontSize: 16),
                     ),
                   ],
@@ -683,7 +737,6 @@ class _QrScannerScreenState extends State<QrScannerScreen>
               ),
             ),
 
-          // Bottom instructions panel
           Positioned(
             bottom: 0,
             left: 0,
@@ -707,7 +760,6 @@ class _QrScannerScreenState extends State<QrScannerScreen>
               child: Column(
                 children: [
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Container(
                         padding: const EdgeInsets.all(8),
@@ -724,7 +776,7 @@ class _QrScannerScreenState extends State<QrScannerScreen>
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
-                          'Position the QR code within the frame',
+                          'Scan the Fuel Pass QR code on the vehicle',
                           style: GoogleFonts.spaceGrotesk(
                             fontSize: 14,
                             fontWeight: FontWeight.w500,
@@ -733,27 +785,6 @@ class _QrScannerScreenState extends State<QrScannerScreen>
                                 : AppColors.lightText,
                           ),
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      _buildTip(
-                        icon: Icons.directions_car_rounded,
-                        label: 'Vehicle QR',
-                        color: AppColors.ocean,
-                      ),
-                      _buildTip(
-                        icon: Icons.local_gas_station_rounded,
-                        label: 'Station QR',
-                        color: AppColors.emerald,
-                      ),
-                      _buildTip(
-                        icon: Icons.payment_rounded,
-                        label: 'Payment QR',
-                        color: AppColors.amber,
                       ),
                     ],
                   ),
@@ -778,34 +809,6 @@ class _QrScannerScreenState extends State<QrScannerScreen>
     );
   }
 
-  Widget _buildTip({
-    required IconData icon,
-    required String label,
-    required Color color,
-  }) {
-    return Column(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Icon(icon, color: color, size: 22),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          label,
-          style: GoogleFonts.spaceGrotesk(
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            color: color,
-          ),
-        ),
-      ],
-    );
-  }
-
   void _showScannerInfo() {
     showModalBottomSheet(
       context: context,
@@ -827,7 +830,7 @@ class _QrScannerScreenState extends State<QrScannerScreen>
                 ),
                 const SizedBox(width: 12),
                 Text(
-                  'Scanner Features',
+                  'Fuel Pass Scanner',
                   style: GoogleFonts.spaceGrotesk(
                     fontSize: 20,
                     fontWeight: FontWeight.w700,
@@ -837,24 +840,24 @@ class _QrScannerScreenState extends State<QrScannerScreen>
             ),
             const SizedBox(height: 20),
             _buildFeatureItem(
+              Icons.verified_rounded,
+              'Passcode Verification',
+              'Validates the vehicle\'s unique Fuel Pass code',
+            ),
+            _buildFeatureItem(
+              Icons.local_gas_station_rounded,
+              'Quota Check',
+              'Shows available weekly fuel quota',
+            ),
+            _buildFeatureItem(
+              Icons.directions_car_rounded,
+              'Vehicle Details',
+              'Displays registration and vehicle information',
+            ),
+            _buildFeatureItem(
               Icons.flashlight_on_rounded,
               'Torch Support',
               'Scan in low light conditions',
-            ),
-            _buildFeatureItem(
-              Icons.cameraswitch_rounded,
-              'Camera Switching',
-              'Switch between front and back cameras',
-            ),
-            _buildFeatureItem(
-              Icons.speed_rounded,
-              'Fast Detection',
-              'Fast QR code detection with anti-duplicate',
-            ),
-            _buildFeatureItem(
-              Icons.vibration_rounded,
-              'Haptic Feedback',
-              'Vibration feedback on successful scan',
             ),
             const SizedBox(height: 20),
             GradientButton(
@@ -919,20 +922,17 @@ class ScannerOverlayPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Create path for the overlay (darken everything except scan area)
     final Path overlayPath = Path()
       ..addRect(Rect.fromLTWH(0, 0, size.width, size.height))
       ..addRect(scanAreaRect)
       ..fillType = PathFillType.evenOdd;
 
-    // Draw dark overlay
     final Paint overlayPaint = Paint()
       ..color = Colors.black.withOpacity(0.6)
       ..style = PaintingStyle.fill;
 
     canvas.drawPath(overlayPath, overlayPaint);
 
-    // Draw scan area border with gradient
     final borderPaint = Paint()
       ..shader = const LinearGradient(
         colors: [AppColors.emerald, AppColors.ocean],
@@ -942,7 +942,6 @@ class ScannerOverlayPainter extends CustomPainter {
 
     canvas.drawRect(scanAreaRect, borderPaint);
 
-    // Draw corner marks
     final cornerPaint = Paint()
       ..shader = const LinearGradient(
         colors: [AppColors.emerald, AppColors.ocean],
@@ -956,7 +955,6 @@ class ScannerOverlayPainter extends CustomPainter {
     final top = scanAreaRect.top;
     final bottom = scanAreaRect.bottom;
 
-    // Top-left corner
     canvas.drawLine(
       Offset(left, top + cornerLength),
       Offset(left, top),
@@ -967,8 +965,6 @@ class ScannerOverlayPainter extends CustomPainter {
       Offset(left, top),
       cornerPaint,
     );
-
-    // Top-right corner
     canvas.drawLine(
       Offset(right - cornerLength, top),
       Offset(right, top),
@@ -979,8 +975,6 @@ class ScannerOverlayPainter extends CustomPainter {
       Offset(right, top),
       cornerPaint,
     );
-
-    // Bottom-left corner
     canvas.drawLine(
       Offset(left, bottom - cornerLength),
       Offset(left, bottom),
@@ -991,8 +985,6 @@ class ScannerOverlayPainter extends CustomPainter {
       Offset(left, bottom),
       cornerPaint,
     );
-
-    // Bottom-right corner
     canvas.drawLine(
       Offset(right - cornerLength, bottom),
       Offset(right, bottom),
@@ -1004,7 +996,6 @@ class ScannerOverlayPainter extends CustomPainter {
       cornerPaint,
     );
 
-    // Draw corner circle decorations
     final circlePaint = Paint()
       ..color = AppColors.emerald
       ..style = PaintingStyle.fill;

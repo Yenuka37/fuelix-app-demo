@@ -84,6 +84,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final args = ModalRoute.of(context)?.settings.arguments;
     if (args != null && args is UserModel && _user?.id != args.id) {
       _user = args;
+      print('HomeScreen - User role received: ${_user?.role}');
+      print('HomeScreen - Is staff: ${_user?.isStaff}');
       _loadAll();
       _checkHomeTour();
     }

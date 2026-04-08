@@ -50,6 +50,10 @@ class _TopBarState extends State<TopBar> with TickerProviderStateMixin {
       _initBellAnimation();
       _dotController.forward(from: 0);
     }
+
+    // Debug print to check role
+    print('TopBar - User role: ${widget.user?.role}');
+    print('TopBar - isStaff: ${widget.user?.isStaff}');
   }
 
   void _initBellAnimation() {
@@ -95,7 +99,9 @@ class _TopBarState extends State<TopBar> with TickerProviderStateMixin {
   /// Check if user is staff or admin (should see QR scanner)
   bool get _showQrScanner {
     final role = widget.user?.role?.toUpperCase() ?? '';
-    return role == 'STAFF' || role == 'ADMIN';
+    final shouldShow = role == 'STAFF' || role == 'ADMIN';
+    print('TopBar - _showQrScanner: $shouldShow (role: $role)');
+    return shouldShow;
   }
 
   @override

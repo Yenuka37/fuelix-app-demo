@@ -59,21 +59,66 @@ class UserModel {
   factory UserModel.fromMap(Map<String, dynamic> map) {
     return UserModel(
       id: map['id'] as int?,
-      firstName: map['first_name'] as String,
-      lastName: map['last_name'] as String,
-      nic: map['nic'] as String,
+      firstName:
+          map['first_name'] as String? ?? map['firstName'] as String? ?? '',
+      lastName: map['last_name'] as String? ?? map['lastName'] as String? ?? '',
+      nic: map['nic'] as String? ?? '',
       mobile: map['mobile'] as String? ?? '',
-      addressLine1: map['address_line1'] as String? ?? '',
-      addressLine2: map['address_line2'] as String? ?? '',
-      addressLine3: map['address_line3'] as String? ?? '',
+      addressLine1:
+          map['address_line1'] as String? ??
+          map['addressLine1'] as String? ??
+          '',
+      addressLine2:
+          map['address_line2'] as String? ??
+          map['addressLine2'] as String? ??
+          '',
+      addressLine3:
+          map['address_line3'] as String? ??
+          map['addressLine3'] as String? ??
+          '',
       district: map['district'] as String? ?? '',
       province: map['province'] as String? ?? '',
-      postalCode: map['postal_code'] as String? ?? '',
-      email: map['email'] as String,
-      password: map['password'] as String,
+      postalCode:
+          map['postal_code'] as String? ?? map['postalCode'] as String? ?? '',
+      email: map['email'] as String? ?? '',
+      password: map['password'] as String? ?? '',
       role: map['role'] as String?,
       createdAt: map['created_at'] != null
           ? DateTime.tryParse(map['created_at'] as String)
+          : null,
+    );
+  }
+
+  factory UserModel.fromJson(Map<String, dynamic> json) {
+    return UserModel(
+      id: json['id'] as int?,
+      firstName:
+          json['firstName'] as String? ?? json['first_name'] as String? ?? '',
+      lastName:
+          json['lastName'] as String? ?? json['last_name'] as String? ?? '',
+      nic: json['nic'] as String? ?? '',
+      mobile: json['mobile'] as String? ?? '',
+      addressLine1:
+          json['addressLine1'] as String? ??
+          json['address_line1'] as String? ??
+          '',
+      addressLine2:
+          json['addressLine2'] as String? ??
+          json['address_line2'] as String? ??
+          '',
+      addressLine3:
+          json['addressLine3'] as String? ??
+          json['address_line3'] as String? ??
+          '',
+      district: json['district'] as String? ?? '',
+      province: json['province'] as String? ?? '',
+      postalCode:
+          json['postalCode'] as String? ?? json['postal_code'] as String? ?? '',
+      email: json['email'] as String? ?? '',
+      password: json['password'] as String? ?? '',
+      role: json['role'] as String?,
+      createdAt: json['createdAt'] != null
+          ? DateTime.tryParse(json['createdAt'] as String)
           : null,
     );
   }

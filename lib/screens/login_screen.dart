@@ -110,6 +110,7 @@ class _LoginScreenState extends State<LoginScreen>
           postalCode: userData['postalCode'] ?? '',
           email: userData['email'],
           password: _passwordController.text,
+          role: userData['role'], // ✅ Add this line
           createdAt: userData['createdAt'] != null
               ? DateTime.tryParse(userData['createdAt'])
               : null,

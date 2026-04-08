@@ -141,6 +141,7 @@ class ApiService {
 
       if (response.statusCode == 200) {
         await saveToken(data['token']);
+        print('Login response - Role: ${data['role']}');
         return {'success': true, 'data': data};
       } else {
         return {'success': false, 'error': data['error'] ?? 'Login failed'};
@@ -171,6 +172,7 @@ class ApiService {
       final data = json.decode(response.body);
 
       if (response.statusCode == 200) {
+        print('Profile response - Role: ${data['role']}');
         return {'success': true, 'data': data};
       } else {
         return {
@@ -481,7 +483,7 @@ class ApiService {
       final data = json.decode(response.body);
 
       if (response.statusCode == 200) {
-        return {'success': true, 'data': data};
+        return {'success': true, 'data': data['data'] ?? data};
       } else {
         return {
           'success': false,
@@ -621,6 +623,135 @@ class ApiService {
         return {
           'success': false,
           'error': data['error'] ?? 'Failed to generate Fuel Pass',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
+  Future<Map<String, dynamic>> regenerateFuelPass(int vehicleId) async {
+    try {
+      final token = await getToken();
+      if (token == null) {
+        return {'success': false, 'error': 'Not authenticated'};
+      }
+
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/vehicles/regenerate-pass/$vehicleId'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 200) {
+        return {'success': true, 'data': data};
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to regenerate Fuel Pass',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
+  // ==================== QR SCANNER PASSCODE APIs ====================
+
+  Future<Map<String, dynamic>> verifyVehiclePasscode(String passcode) async {
+    try {
+      final token = await getToken();
+      if (token == null) {
+        return {'success': false, 'error': 'Not authenticated'};
+      }
+
+      final response = await http
+          .get(
+            Uri.parse('$baseUrl/vehicles/verify-passcode?passcode=$passcode'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 200) {
+        return {'success': true, 'data': data};
+      } else if (response.statusCode == 404) {
+        return {'success': false, 'error': 'Invalid Fuel Pass Code'};
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to verify passcode',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
+  Future<Map<String, dynamic>> checkPasscodeExists(String passcode) async {
+    try {
+      final token = await getToken();
+      if (token == null) {
+        return {'success': false, 'error': 'Not authenticated'};
+      }
+
+      final response = await http
+          .get(
+            Uri.parse('$baseUrl/vehicles/check-passcode/$passcode'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 200) {
+        return {'success': true, 'valid': data['valid'] ?? false};
+      } else {
+        return {'success': false, 'valid': false};
+      }
+    } catch (e) {
+      return {'success': false, 'valid': false, 'error': 'Network error: $e'};
+    }
+  }
+
+  Future<Map<String, dynamic>> getVehicleByPasscode(String passcode) async {
+    try {
+      final token = await getToken();
+      if (token == null) {
+        return {'success': false, 'error': 'Not authenticated'};
+      }
+
+      final response = await http
+          .get(
+            Uri.parse('$baseUrl/vehicles/by-passcode/$passcode'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 200) {
+        return {'success': true, 'data': data};
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to fetch vehicle',
         };
       }
     } catch (e) {
