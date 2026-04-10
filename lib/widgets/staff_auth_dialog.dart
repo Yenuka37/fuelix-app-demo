@@ -106,75 +106,93 @@ class _StaffAuthDialogState extends State<StaffAuthDialog>
     final nic = _nicController.text.trim().toUpperCase();
     final password = _passwordController.text;
 
+    // Start timing each step
+    final stopwatches = {
+      'auth': Stopwatch(),
+      'role': Stopwatch(),
+      'staff': Stopwatch(),
+      'station': Stopwatch(),
+      'complete': Stopwatch(),
+    };
+
     try {
       // Step 1: Authenticate user
+      stopwatches['auth']!.start();
       _updateStep('auth', AuthStatus.loading);
       await Future.delayed(const Duration(milliseconds: 200));
 
       final authResult = await _apiService.authenticateStaff(nic, password);
-
-      print('Auth Result: $authResult');
+      stopwatches['auth']!.stop();
 
       if (!authResult['success']) {
         _updateStep(
           'auth',
           AuthStatus.failed,
-          message: authResult['error'] ?? 'Authentication failed',
+          message: '${stopwatches['auth']!.elapsed.inSeconds}s',
         );
-        _showError(authResult['error'] ?? 'Invalid NIC or password');
+        _showError('Invalid credentials. Please check your NIC and password.');
         return;
       }
 
-      _updateStep('auth', AuthStatus.completed, message: 'Verified: $nic');
+      _updateStep(
+        'auth',
+        AuthStatus.completed,
+        message: '${stopwatches['auth']!.elapsed.inSeconds}s',
+      );
       await Future.delayed(const Duration(milliseconds: 200));
 
       final data = authResult['data'];
-      print('Auth Data: $data');
 
-      // Step 2: Check role - Handle null role properly
+      // Step 2: Check role
+      stopwatches['role']!.start();
       _updateStep('role', AuthStatus.loading);
       await Future.delayed(const Duration(milliseconds: 200));
 
       final userRole = data['role']?.toString().toUpperCase() ?? '';
-      print('User Role from response: $userRole');
 
       if (userRole.isEmpty) {
+        stopwatches['role']!.stop();
         _updateStep(
           'role',
           AuthStatus.failed,
-          message: 'Role information missing from server response',
+          message: '${stopwatches['role']!.elapsed.inSeconds}s',
         );
-        _showError('Role information missing. Please contact support.');
+        _showError('Authentication failed. Please contact support.');
         return;
       }
 
       if (userRole != 'STAFF') {
+        stopwatches['role']!.stop();
         _updateStep(
           'role',
           AuthStatus.failed,
-          message: 'User role is $userRole, STAFF required',
+          message: '${stopwatches['role']!.elapsed.inSeconds}s',
         );
-        _showError(
-          'Access denied. Only staff members can use the QR scanner.\nYour role: $userRole',
-        );
+        _showError('Access denied. Staff privileges required.');
         return;
       }
 
-      _updateStep('role', AuthStatus.completed, message: 'Staff role verified');
+      stopwatches['role']!.stop();
+      _updateStep(
+        'role',
+        AuthStatus.completed,
+        message: '${stopwatches['role']!.elapsed.inSeconds}s',
+      );
       await Future.delayed(const Duration(milliseconds: 200));
 
       // Step 3: Verify staff record
+      stopwatches['staff']!.start();
       _updateStep('staff', AuthStatus.loading);
       await Future.delayed(const Duration(milliseconds: 200));
 
       final staffId = data['staffId'];
-      print('Staff ID: $staffId');
 
       if (staffId == null || staffId == 0) {
+        stopwatches['staff']!.stop();
         _updateStep(
           'staff',
           AuthStatus.failed,
-          message: 'Staff record not found',
+          message: '${stopwatches['staff']!.elapsed.inSeconds}s',
         );
         _showError(
           'Staff record not found. Please contact your station owner.',
@@ -182,37 +200,43 @@ class _StaffAuthDialogState extends State<StaffAuthDialog>
         return;
       }
 
-      _updateStep('staff', AuthStatus.completed, message: 'Staff ID: $staffId');
+      stopwatches['staff']!.stop();
+      _updateStep(
+        'staff',
+        AuthStatus.completed,
+        message: '${stopwatches['staff']!.elapsed.inSeconds}s',
+      );
       await Future.delayed(const Duration(milliseconds: 200));
 
       // Step 4: Load station details
+      stopwatches['station']!.start();
       _updateStep('station', AuthStatus.loading);
       await Future.delayed(const Duration(milliseconds: 200));
 
       final stationId = data['stationId'];
       final stationName = data['stationName'];
-      final stationBrand = data['stationBrand'];
-
-      print('Station ID: $stationId, Name: $stationName');
 
       if (stationId == null || stationId == 0) {
+        stopwatches['station']!.stop();
         _updateStep(
           'station',
           AuthStatus.failed,
-          message: 'Station information not found',
+          message: '${stopwatches['station']!.elapsed.inSeconds}s',
         );
         _showError('Station information not found.');
         return;
       }
 
+      stopwatches['station']!.stop();
       _updateStep(
         'station',
         AuthStatus.completed,
-        message: '$stationName (${stationBrand ?? 'Unknown'})',
+        message: '${stopwatches['station']!.elapsed.inSeconds}s',
       );
       await Future.delayed(const Duration(milliseconds: 200));
 
       // Step 5: Save data and complete
+      stopwatches['complete']!.start();
       _updateStep('complete', AuthStatus.loading);
       await Future.delayed(const Duration(milliseconds: 200));
 
@@ -222,13 +246,13 @@ class _StaffAuthDialogState extends State<StaffAuthDialog>
       // Save token using static method
       if (data['token'] != null && data['token'].toString().isNotEmpty) {
         await ApiService.saveToken(data['token']);
-        print('Token saved successfully');
       }
 
+      stopwatches['complete']!.stop();
       _updateStep(
         'complete',
         AuthStatus.completed,
-        message: 'Welcome, ${data['staffName'] ?? 'Staff'}!',
+        message: '${stopwatches['complete']!.elapsed.inSeconds}s',
       );
       await Future.delayed(const Duration(milliseconds: 400));
 
@@ -246,8 +270,17 @@ class _StaffAuthDialogState extends State<StaffAuthDialog>
       print('Authentication error: $e');
       print('Stack trace: $stackTrace');
 
-      _updateStep('auth', AuthStatus.failed, message: 'Error: ${e.toString()}');
-      _showError('Authentication failed: ${e.toString()}');
+      // Stop all running stopwatches
+      stopwatches.forEach((key, sw) {
+        if (sw.isRunning) sw.stop();
+      });
+
+      _updateStep(
+        'auth',
+        AuthStatus.failed,
+        message: '${stopwatches['auth']!.elapsed.inSeconds}s',
+      );
+      _showError('Authentication failed. Please try again.');
 
       setState(() {
         _isAuthenticating = false;
@@ -282,9 +315,7 @@ class _StaffAuthDialogState extends State<StaffAuthDialog>
             ),
           ],
         ),
-        content: SingleChildScrollView(
-          child: Text(message, style: GoogleFonts.inter(fontSize: 14)),
-        ),
+        content: Text(message, style: GoogleFonts.inter(fontSize: 14)),
         actions: [
           TextButton(
             onPressed: () {
@@ -474,6 +505,20 @@ class _StaffAuthDialogState extends State<StaffAuthDialog>
       }
     }
 
+    String getDisplayMessage() {
+      if (step.message != null && step.message!.isNotEmpty) {
+        if (step.status == AuthStatus.completed) {
+          return '✓ Completed in ${step.message}';
+        } else if (step.status == AuthStatus.failed) {
+          return '✗ Failed';
+        } else if (step.status == AuthStatus.loading) {
+          return 'Processing...';
+        }
+        return step.message!;
+      }
+      return step.subtitle;
+    }
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
@@ -514,7 +559,7 @@ class _StaffAuthDialogState extends State<StaffAuthDialog>
                   ),
                 ),
                 Text(
-                  step.message ?? step.subtitle,
+                  getDisplayMessage(),
                   style: GoogleFonts.inter(
                     fontSize: 11,
                     color: step.status == AuthStatus.failed

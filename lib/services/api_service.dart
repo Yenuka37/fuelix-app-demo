@@ -127,6 +127,44 @@ class ApiService {
     await prefs.remove('staff_name');
   }
 
+  // Add this method to ApiService class
+
+  // Staff QR verification with full steps
+  Future<Map<String, dynamic>> staffVerifyPasscode(String passcode) async {
+    try {
+      final token = await getToken();
+      if (token == null) {
+        return {'success': false, 'error': 'Not authenticated'};
+      }
+
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/vehicles/staff-verify'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: json.encode({'passcode': passcode}),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+      print('Staff verification response: $data');
+
+      if (response.statusCode == 200) {
+        return data;
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Verification failed',
+        };
+      }
+    } catch (e) {
+      print('Staff verification error: $e');
+      return {'success': false, 'error': 'Network error: ${e.toString()}'};
+    }
+  }
+
   // ==================== AUTH APIs ====================
 
   // Send OTP to mobile
