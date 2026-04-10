@@ -124,6 +124,22 @@ class ApiService {
     await prefs.remove('staff_name');
   }
 
+  // Clear all staff-related data (call this on logout)
+  Future<void> clearAllStaffData() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('staff_user_id');
+    await prefs.remove('staff_id');
+    await prefs.remove('station_id');
+    await prefs.remove('station_name');
+    await prefs.remove('station_brand');
+    await prefs.remove('staff_name');
+
+    // Clear token as well
+    await clearToken();
+
+    print('All staff data cleared');
+  }
+
   // Staff QR verification with full steps
   Future<Map<String, dynamic>> staffVerifyPasscode(String passcode) async {
     try {

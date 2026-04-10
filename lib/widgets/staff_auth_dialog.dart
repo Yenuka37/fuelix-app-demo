@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import '../services/api_service.dart';
+import '../services/staff_cache_service.dart';
 import '../widgets/custom_button.dart';
 
 class StaffAuthDialog extends StatefulWidget {
@@ -25,6 +26,7 @@ class _StaffAuthDialogState extends State<StaffAuthDialog>
   final _nicController = TextEditingController();
   final _passwordController = TextEditingController();
   final _apiService = ApiService();
+  final _cacheService = StaffCacheService();
 
   bool _isLoading = false;
   bool _obscurePassword = true;
@@ -35,6 +37,7 @@ class _StaffAuthDialogState extends State<StaffAuthDialog>
   void initState() {
     super.initState();
     _initializeSteps();
+    _checkCache();
   }
 
   void _initializeSteps() {
@@ -75,6 +78,28 @@ class _StaffAuthDialogState extends State<StaffAuthDialog>
         icon: Icons.check_circle_rounded,
       ),
     ];
+  }
+
+  Future<void> _checkCache() async {
+    final cachedData = await _cacheService.getValidStaffCache();
+
+    if (cachedData != null && mounted) {
+      print('Valid cache found! Loading staff data from cache...');
+
+      // Save staff data to ApiService
+      await _apiService.saveStaffData(cachedData);
+
+      // Save token
+      if (cachedData['token'] != null) {
+        await ApiService.saveToken(cachedData['token']);
+      }
+
+      // Close dialog and open scanner directly
+      if (mounted) {
+        Navigator.of(context).pop();
+        widget.onSuccess();
+      }
+    }
   }
 
   void _updateStep(String id, AuthStatus status, {String? message}) {
@@ -130,7 +155,10 @@ class _StaffAuthDialogState extends State<StaffAuthDialog>
           AuthStatus.failed,
           message: '${stopwatches['auth']!.elapsed.inSeconds}s',
         );
-        _showError('Invalid credentials. Please check your NIC and password.');
+        _showError(
+          authResult['error'] ??
+              'Invalid credentials. Please check your NIC and password.',
+        );
         return;
       }
 
@@ -239,6 +267,9 @@ class _StaffAuthDialogState extends State<StaffAuthDialog>
       stopwatches['complete']!.start();
       _updateStep('complete', AuthStatus.loading);
       await Future.delayed(const Duration(milliseconds: 200));
+
+      // Save staff data to cache (7 days expiry)
+      await _cacheService.saveStaffCache(data);
 
       // Save staff data locally
       await _apiService.saveStaffData(data);

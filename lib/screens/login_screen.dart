@@ -6,6 +6,7 @@ import '../models/user_model.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/tutorial_service.dart';
+import '../services/staff_cache_service.dart';
 import '../widgets/custom_button.dart';
 import 'onboarding_screen.dart';
 import 'forgot_password_screen.dart';
@@ -27,6 +28,7 @@ class _LoginScreenState extends State<LoginScreen>
   final _db = DbHelper();
   final _apiService = ApiService();
   final _authService = AuthService();
+  final _cacheService = StaffCacheService();
 
   bool _isLoading = false;
   bool _obscurePassword = true;
