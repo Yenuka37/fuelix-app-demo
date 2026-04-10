@@ -31,13 +31,17 @@ class _StaffQrScannerScreenState extends State<StaffQrScannerScreen>
   String? _extractedValue;
   bool _hasScanned = false;
 
-  // Verification steps
+  // Verification state
   bool _isVerifying = false;
-  List<VerificationStep> _verificationSteps = [];
-  Map<String, dynamic>? _verifiedData;
   bool _verificationComplete = false;
   bool _verificationFailed = false;
   String? _verificationError;
+  Map<String, dynamic>? _verifiedData;
+
+  // Refill state
+  String _litresInput = '';
+  TextEditingController _litresController = TextEditingController();
+  bool _isRefilling = false;
 
   @override
   void initState() {
@@ -45,40 +49,9 @@ class _StaffQrScannerScreenState extends State<StaffQrScannerScreen>
     WidgetsBinding.instance.addObserver(this);
     _initScanner();
     _loadStationData();
-    _initVerificationSteps();
-  }
-
-  void _initVerificationSteps() {
-    _verificationSteps = [
-      VerificationStep(
-        id: 'step1',
-        title: 'Fuel Pass Code',
-        subtitle: 'Verifying vehicle passcode',
-        status: VerificationStatus.pending,
-        icon: Icons.qr_code_rounded,
-      ),
-      VerificationStep(
-        id: 'step2',
-        title: 'Quota Check',
-        subtitle: 'Checking available fuel quota',
-        status: VerificationStatus.pending,
-        icon: Icons.local_gas_station_rounded,
-      ),
-      VerificationStep(
-        id: 'step3',
-        title: 'Wallet Balance',
-        subtitle: 'Verifying wallet balance',
-        status: VerificationStatus.pending,
-        icon: Icons.account_balance_wallet_rounded,
-      ),
-      VerificationStep(
-        id: 'step4',
-        title: 'Load Data',
-        subtitle: 'Loading vehicle information',
-        status: VerificationStatus.pending,
-        icon: Icons.cloud_download_rounded,
-      ),
-    ];
+    _litresController.addListener(() {
+      setState(() {});
+    });
   }
 
   Future<void> _loadStationData() async {
@@ -122,6 +95,7 @@ class _StaffQrScannerScreenState extends State<StaffQrScannerScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _scannerController.dispose();
+    _litresController.dispose();
     super.dispose();
   }
 
@@ -155,11 +129,10 @@ class _StaffQrScannerScreenState extends State<StaffQrScannerScreen>
         _extractedValue = extractedValue;
         _hasScanned = true;
         _isProcessing = false;
-        _isVerifying = true;
       });
 
-      // Start verification
-      await _verifyPasscode(extractedValue);
+      // Show verification dialog
+      await _showVerificationDialog(extractedValue);
     } catch (e) {
       setState(() {
         _errorMessage = 'Failed to process QR code';
@@ -208,104 +181,369 @@ class _StaffQrScannerScreenState extends State<StaffQrScannerScreen>
     }
   }
 
-  Future<void> _verifyPasscode(String passcode) async {
-    _updateStep('step1', VerificationStatus.loading);
+  Future<void> _showVerificationDialog(String passcode) async {
+    List<VerificationStep> steps = [
+      VerificationStep(
+        id: 'step1',
+        title: 'Fuel Pass Code',
+        subtitle: 'Verifying vehicle passcode',
+        status: VerificationStatus.pending,
+        icon: Icons.qr_code_rounded,
+      ),
+      VerificationStep(
+        id: 'step2',
+        title: 'Quota Check',
+        subtitle: 'Checking available fuel quota',
+        status: VerificationStatus.pending,
+        icon: Icons.local_gas_station_rounded,
+      ),
+      VerificationStep(
+        id: 'step3',
+        title: 'Wallet Balance',
+        subtitle: 'Verifying wallet balance',
+        status: VerificationStatus.pending,
+        icon: Icons.account_balance_wallet_rounded,
+      ),
+      VerificationStep(
+        id: 'step4',
+        title: 'Load Data',
+        subtitle: 'Loading vehicle information',
+        status: VerificationStatus.pending,
+        icon: Icons.cloud_download_rounded,
+      ),
+    ];
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(24),
+            ),
+            title: Row(
+              children: [
+                Icon(
+                  Icons.verified_user_rounded,
+                  color: AppColors.emerald,
+                  size: 28,
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  'Verifying Fuel Pass',
+                  style: GoogleFonts.spaceGrotesk(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+            content: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: steps
+                    .map((step) => _buildVerificationStepWidget(step))
+                    .toList(),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  _resetToScan();
+                },
+                child: Text(
+                  'Cancel',
+                  style: GoogleFonts.spaceGrotesk(
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.ocean,
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    // Perform verification
+    bool success = true;
+
+    // Step 1: Verify passcode
+    setState(() {});
+    steps[0] = steps[0].copyWith(status: VerificationStatus.loading);
+    _updateDialogStep(steps, 0, VerificationStatus.loading);
     await Future.delayed(const Duration(milliseconds: 200));
 
     final result = await _apiService.staffVerifyPasscode(passcode);
 
     if (!result['success']) {
-      _updateStep('step1', VerificationStatus.failed);
-      _verificationFailed = true;
-      _verificationError = result['error'] ?? 'Invalid Fuel Pass Code';
-      setState(() {});
+      steps[0] = steps[0].copyWith(
+        status: VerificationStatus.failed,
+        message: 'Invalid Fuel Pass Code',
+      );
+      _updateDialogStep(
+        steps,
+        0,
+        VerificationStatus.failed,
+        message: 'Invalid Fuel Pass Code',
+      );
+      await Future.delayed(const Duration(milliseconds: 1500));
+      if (mounted) {
+        Navigator.pop(context);
+        _showVerificationFailedDialog(
+          'Invalid Fuel Pass Code. Please scan a valid QR code.',
+        );
+      }
       return;
     }
 
-    _updateStep('step1', VerificationStatus.completed);
-    await Future.delayed(const Duration(milliseconds: 200));
-
-    // Step 2: Quota check
-    _updateStep('step2', VerificationStatus.loading);
+    steps[0] = steps[0].copyWith(status: VerificationStatus.completed);
+    _updateDialogStep(steps, 0, VerificationStatus.completed);
     await Future.delayed(const Duration(milliseconds: 300));
 
+    // Step 2: Quota check
+    steps[1] = steps[1].copyWith(status: VerificationStatus.loading);
+    _updateDialogStep(steps, 1, VerificationStatus.loading);
+    await Future.delayed(const Duration(milliseconds: 200));
+
     if (result.containsKey('step2') && !result['step2']['success']) {
-      _updateStep(
-        'step2',
+      steps[1] = steps[1].copyWith(
+        status: VerificationStatus.failed,
+        message: result['step2']['message'],
+      );
+      _updateDialogStep(
+        steps,
+        1,
         VerificationStatus.failed,
         message: result['step2']['message'],
       );
-      _verificationFailed = true;
-      _verificationError = result['step2']['message'];
-      setState(() {});
+      await Future.delayed(const Duration(milliseconds: 1500));
+      if (mounted) {
+        Navigator.pop(context);
+        _showVerificationFailedDialog(result['step2']['message']);
+      }
       return;
     }
 
-    _updateStep(
-      'step2',
-      VerificationStatus.completed,
-      message: 'Remaining: ${result['step2']['remainingQuota']} L',
-    );
-    await Future.delayed(const Duration(milliseconds: 200));
-
-    // Step 3: Wallet check
-    _updateStep('step3', VerificationStatus.loading);
+    steps[1] = steps[1].copyWith(status: VerificationStatus.completed);
+    _updateDialogStep(steps, 1, VerificationStatus.completed);
     await Future.delayed(const Duration(milliseconds: 300));
 
+    // Step 3: Wallet check
+    steps[2] = steps[2].copyWith(status: VerificationStatus.loading);
+    _updateDialogStep(steps, 2, VerificationStatus.loading);
+    await Future.delayed(const Duration(milliseconds: 200));
+
     if (result.containsKey('step3') && !result['step3']['success']) {
-      _updateStep(
-        'step3',
+      steps[2] = steps[2].copyWith(
+        status: VerificationStatus.failed,
+        message: result['step3']['message'],
+      );
+      _updateDialogStep(
+        steps,
+        2,
         VerificationStatus.failed,
         message: result['step3']['message'],
       );
-      _verificationFailed = true;
-      _verificationError = result['step3']['message'];
-      setState(() {});
+      await Future.delayed(const Duration(milliseconds: 1500));
+      if (mounted) {
+        Navigator.pop(context);
+        _showVerificationFailedDialog(result['step3']['message']);
+      }
       return;
     }
 
-    _updateStep(
-      'step3',
-      VerificationStatus.completed,
-      message: 'Balance: LKR ${result['step3']['balance']}',
-    );
-    await Future.delayed(const Duration(milliseconds: 200));
+    steps[2] = steps[2].copyWith(status: VerificationStatus.completed);
+    _updateDialogStep(steps, 2, VerificationStatus.completed);
+    await Future.delayed(const Duration(milliseconds: 300));
 
     // Step 4: Load data
-    _updateStep('step4', VerificationStatus.loading);
-    await Future.delayed(const Duration(milliseconds: 300));
+    steps[3] = steps[3].copyWith(status: VerificationStatus.loading);
+    _updateDialogStep(steps, 3, VerificationStatus.loading);
+    await Future.delayed(const Duration(milliseconds: 200));
 
     if (result.containsKey('step4') && result['step4']['success']) {
       _verifiedData = result['step4'];
-      _updateStep(
-        'step4',
-        VerificationStatus.completed,
-        message: 'Vehicle: ${_verifiedData?['registrationNo']}',
-      );
-      _verificationComplete = true;
+      steps[3] = steps[3].copyWith(status: VerificationStatus.completed);
+      _updateDialogStep(steps, 3, VerificationStatus.completed);
+      await Future.delayed(const Duration(milliseconds: 500));
     } else {
-      _updateStep('step4', VerificationStatus.failed);
-      _verificationFailed = true;
-      _verificationError = 'Failed to load vehicle data';
+      steps[3] = steps[3].copyWith(
+        status: VerificationStatus.failed,
+        message: 'Failed to load data',
+      );
+      _updateDialogStep(
+        steps,
+        3,
+        VerificationStatus.failed,
+        message: 'Failed to load data',
+      );
+      await Future.delayed(const Duration(milliseconds: 1500));
+      if (mounted) {
+        Navigator.pop(context);
+        _showVerificationFailedDialog('Failed to load vehicle data');
+      }
+      return;
     }
 
-    setState(() {});
+    // Close dialog and show refill screen
+    if (mounted) {
+      Navigator.pop(context);
+      setState(() {
+        _verificationComplete = true;
+        _isVerifying = false;
+        _litresInput = '';
+        _litresController.clear();
+      });
+    }
   }
 
-  void _updateStep(String id, VerificationStatus status, {String? message}) {
-    if (!mounted) return;
-    setState(() {
-      final index = _verificationSteps.indexWhere((step) => step.id == id);
-      if (index != -1) {
-        _verificationSteps[index] = _verificationSteps[index].copyWith(
-          status: status,
-          message: message,
-        );
+  void _updateDialogStep(
+    List<VerificationStep> steps,
+    int index,
+    VerificationStatus status, {
+    String? message,
+  }) {
+    // This is handled by the dialog's StatefulBuilder
+    // We need to rebuild the dialog content
+    if (mounted) {
+      // Force rebuild of dialog by calling setState on the dialog's builder
+      // Since we can't directly access setDialogState, we'll use a different approach
+    }
+  }
+
+  Widget _buildVerificationStepWidget(VerificationStep step) {
+    Color getStatusColor() {
+      switch (step.status) {
+        case VerificationStatus.completed:
+          return AppColors.emerald;
+        case VerificationStatus.failed:
+          return AppColors.error;
+        case VerificationStatus.loading:
+          return AppColors.ocean;
+        default:
+          return Colors.grey;
       }
-    });
+    }
+
+    IconData getStatusIcon() {
+      switch (step.status) {
+        case VerificationStatus.completed:
+          return Icons.check_circle_rounded;
+        case VerificationStatus.failed:
+          return Icons.error_outline;
+        case VerificationStatus.loading:
+          return Icons.hourglass_empty_rounded;
+        default:
+          return step.icon;
+      }
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: getStatusColor().withOpacity(0.1),
+            ),
+            child: step.status == VerificationStatus.loading
+                ? SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        getStatusColor(),
+                      ),
+                    ),
+                  )
+                : Icon(getStatusIcon(), size: 18, color: getStatusColor()),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  step.title,
+                  style: GoogleFonts.spaceGrotesk(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                Text(
+                  step.message ?? step.subtitle,
+                  style: GoogleFonts.inter(fontSize: 11, color: Colors.grey),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
-  void _resetScanner() {
+  void _showVerificationFailedDialog(String message) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Icon(Icons.error_outline, color: AppColors.error, size: 28),
+            const SizedBox(width: 12),
+            Text(
+              'Verification Failed',
+              style: GoogleFonts.spaceGrotesk(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+        content: Text(message, style: GoogleFonts.inter(fontSize: 14)),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _resetToScan();
+            },
+            child: Text(
+              'Scan Again',
+              style: GoogleFonts.spaceGrotesk(
+                fontWeight: FontWeight.w600,
+                color: AppColors.ocean,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _exitToLogin();
+            },
+            child: Text(
+              'Exit',
+              style: GoogleFonts.spaceGrotesk(
+                fontWeight: FontWeight.w600,
+                color: AppColors.error,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _resetToScan() {
     setState(() {
       _isScanning = true;
       _errorMessage = null;
@@ -317,8 +555,10 @@ class _StaffQrScannerScreenState extends State<StaffQrScannerScreen>
       _verificationFailed = false;
       _verificationError = null;
       _verifiedData = null;
+      _litresInput = '';
+      _litresController.clear();
+      _isRefilling = false;
     });
-    _initVerificationSteps();
     _scannerController.start();
   }
 
@@ -343,6 +583,212 @@ class _StaffQrScannerScreenState extends State<StaffQrScannerScreen>
           : CameraFacing.back;
     });
     _scannerController.switchCamera();
+  }
+
+  void _onNumberPadTap(String value) {
+    setState(() {
+      if (value == 'clear') {
+        _litresInput = '';
+        _litresController.clear();
+      } else if (value == '.') {
+        if (!_litresInput.contains('.')) {
+          _litresInput += value;
+          _litresController.text = _litresInput;
+        }
+      } else {
+        _litresInput += value;
+        _litresController.text = _litresInput;
+      }
+
+      // Auto-correct if exceeds available quota
+      double entered = double.tryParse(_litresInput) ?? 0;
+      double availableQuota = _verifiedData?['remainingQuota'] ?? 0;
+      if (entered > availableQuota && availableQuota > 0) {
+        _litresInput = availableQuota.toString();
+        _litresController.text = _litresInput;
+      }
+    });
+  }
+
+  void _onRefillPressed() {
+    double litres = double.tryParse(_litresInput) ?? 0;
+    double availableQuota = _verifiedData?['remainingQuota'] ?? 0;
+
+    if (litres <= 0) return;
+    if (litres > availableQuota) {
+      _litresInput = availableQuota.toString();
+      _litresController.text = _litresInput;
+      litres = availableQuota;
+    }
+
+    _showPaymentConfirmation(litres);
+  }
+
+  void _showPaymentConfirmation(double litres) {
+    double pricePerLitre = 350.0;
+    double totalCost = litres * pricePerLitre;
+    double balance = _verifiedData?['balance'] ?? 0;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Icon(Icons.payment_rounded, color: AppColors.emerald, size: 28),
+            const SizedBox(width: 12),
+            Text(
+              'Confirm Refill',
+              style: GoogleFonts.spaceGrotesk(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildInfoRow(
+              Icons.opacity_rounded,
+              'Litres',
+              '${litres.toStringAsFixed(2)} L',
+            ),
+            const SizedBox(height: 12),
+            _buildInfoRow(
+              Icons.currency_rupee_rounded,
+              'Total Cost',
+              'LKR ${totalCost.toStringAsFixed(2)}',
+            ),
+            const SizedBox(height: 12),
+            _buildInfoRow(
+              Icons.account_balance_wallet_rounded,
+              'Wallet Balance',
+              'LKR ${balance.toStringAsFixed(2)}',
+            ),
+            if (totalCost > balance)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(10),
+                    color: AppColors.error.withOpacity(0.1),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.warning_amber_rounded,
+                        color: AppColors.error,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Insufficient balance. Please top up your wallet.',
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            color: AppColors.error,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.spaceGrotesk(
+                fontWeight: FontWeight.w600,
+                color: AppColors.ocean,
+              ),
+            ),
+          ),
+          if (totalCost <= balance)
+            GradientButton(
+              label: 'Confirm Refill',
+              onPressed: () {
+                Navigator.pop(ctx);
+                _processRefill(litres, totalCost);
+              },
+              height: 45,
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _processRefill(double litres, double totalCost) async {
+    setState(() {
+      _isRefilling = true;
+    });
+
+    try {
+      final result = await _apiService.addFuelLogFromStaff(
+        vehicleId: _verifiedData?['vehicleId'],
+        userId: _verifiedData?['userId'],
+        litres: litres,
+        fuelType: _verifiedData?['fuelType'] ?? 'Petrol',
+        vehicleType: _verifiedData?['vehicleType'] ?? 'Car',
+        stationName: _stationName,
+      );
+
+      if (result['success']) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Refill successful! ${litres.toStringAsFixed(2)} L added',
+            ),
+            backgroundColor: AppColors.emerald,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+        _resetToScan();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result['error'] ?? 'Refill failed'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: ${e.toString()}'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isRefilling = false;
+        });
+      }
+    }
+  }
+
+  Widget _buildInfoRow(IconData icon, String label, String value) {
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: Colors.grey),
+        const SizedBox(width: 12),
+        Expanded(child: Text(label, style: GoogleFonts.inter(fontSize: 13))),
+        Text(
+          value,
+          style: GoogleFonts.spaceGrotesk(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
   }
 
   @override
@@ -374,12 +820,10 @@ class _StaffQrScannerScreenState extends State<StaffQrScannerScreen>
                   : Icons.flashlight_off_rounded,
               color: _isTorchOn ? AppColors.amber : null,
             ),
-            tooltip: _isTorchOn ? 'Turn off torch' : 'Turn on torch',
           ),
           IconButton(
             onPressed: _switchCamera,
             icon: const Icon(Icons.cameraswitch_rounded),
-            tooltip: 'Switch Camera',
           ),
         ],
       ),
@@ -393,7 +837,6 @@ class _StaffQrScannerScreenState extends State<StaffQrScannerScreen>
               border: Border(
                 bottom: BorderSide(
                   color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-                  width: 1,
                 ),
               ),
             ),
@@ -464,17 +907,103 @@ class _StaffQrScannerScreenState extends State<StaffQrScannerScreen>
             ),
           ),
 
-          // Mid Section - Scanner, Verification, or Data Display
+          // Vehicle Info Section (shown when verification complete)
+          if (_verificationComplete && _verifiedData != null)
+            Container(
+              padding: const EdgeInsets.all(16),
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                gradient: LinearGradient(
+                  colors: [
+                    AppColors.emerald.withOpacity(0.1),
+                    AppColors.ocean.withOpacity(0.1),
+                  ],
+                ),
+                border: Border.all(color: AppColors.emerald.withOpacity(0.3)),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.directions_car_rounded,
+                        size: 20,
+                        color: AppColors.emerald,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'Registration No',
+                          style: GoogleFonts.inter(fontSize: 12),
+                        ),
+                      ),
+                      Text(
+                        _verifiedData?['registrationNo'] ?? 'N/A',
+                        style: GoogleFonts.spaceGrotesk(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.opacity_rounded,
+                        size: 20,
+                        color: AppColors.emerald,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'Available Quota',
+                          style: GoogleFonts.inter(fontSize: 12),
+                        ),
+                      ),
+                      Text(
+                        '${(_verifiedData?['remainingQuota'] ?? 0).toStringAsFixed(1)} L',
+                        style: GoogleFonts.spaceGrotesk(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.emerald,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.account_balance_wallet_rounded,
+                        size: 20,
+                        color: AppColors.emerald,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'Wallet Balance',
+                          style: GoogleFonts.inter(fontSize: 12),
+                        ),
+                      ),
+                      Text(
+                        'LKR ${(_verifiedData?['balance'] ?? 0).toStringAsFixed(2)}',
+                        style: GoogleFonts.spaceGrotesk(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+
+          // Mid Section - Scanner or Refill Screen
           Expanded(
-            child: _isVerifying
-                ? _buildVerificationScreen(isDark)
-                : _verificationComplete && _verifiedData != null
-                ? _buildDataDisplayScreen(isDark)
-                : _hasScanned &&
-                      _extractedValue != null &&
-                      !_isVerifying &&
-                      !_verificationComplete
-                ? _buildExtractedValueScreen(isDark)
+            child: _verificationComplete && _verifiedData != null
+                ? _buildRefillScreen(isDark)
                 : _buildScannerScreen(isDark, scanAreaTop, scanAreaSize),
           ),
         ],
@@ -522,7 +1051,7 @@ class _StaffQrScannerScreenState extends State<StaffQrScannerScreen>
                     const SizedBox(height: 20),
                     GradientButton(
                       label: 'Retry',
-                      onPressed: _resetScanner,
+                      onPressed: _resetToScan,
                       height: 45,
                     ),
                   ],
@@ -567,226 +1096,14 @@ class _StaffQrScannerScreenState extends State<StaffQrScannerScreen>
     );
   }
 
-  Widget _buildExtractedValueScreen(bool isDark) {
-    return Container(
-      width: double.infinity,
-      color: isDark ? AppColors.darkBackground : AppColors.lightBackground,
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 80,
-                height: 80,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: const LinearGradient(
-                    colors: [AppColors.emerald, AppColors.ocean],
-                  ),
-                ),
-                child: const Icon(
-                  Icons.qr_code_scanner_rounded,
-                  color: Colors.white,
-                  size: 40,
-                ),
-              ),
-              const SizedBox(height: 24),
-              Text(
-                'QR Code Scanned',
-                style: GoogleFonts.spaceGrotesk(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  color: isDark ? AppColors.darkText : AppColors.lightText,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Extracted Value:',
-                style: GoogleFonts.inter(
-                  fontSize: 13,
-                  color: isDark
-                      ? AppColors.darkTextSub
-                      : AppColors.lightTextSub,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  gradient: LinearGradient(
-                    colors: [
-                      AppColors.emerald.withOpacity(0.1),
-                      AppColors.ocean.withOpacity(0.1),
-                    ],
-                  ),
-                  border: Border.all(
-                    color: AppColors.emerald.withOpacity(0.3),
-                    width: 1.5,
-                  ),
-                ),
-                child: SelectableText(
-                  _extractedValue ?? '',
-                  style: GoogleFonts.spaceGrotesk(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.emerald,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-              const SizedBox(height: 24),
-              Text(
-                'Verifying credentials...',
-                style: GoogleFonts.inter(fontSize: 12, color: AppColors.ocean),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+  Widget _buildRefillScreen(bool isDark) {
+    double availableQuota = _verifiedData?['remainingQuota'] ?? 0;
+    double enteredLitres = double.tryParse(_litresInput) ?? 0;
+    bool isRefillEnabled =
+        _litresInput.isNotEmpty &&
+        enteredLitres > 0 &&
+        enteredLitres <= availableQuota;
 
-  Widget _buildVerificationScreen(bool isDark) {
-    return Container(
-      width: double.infinity,
-      color: isDark ? AppColors.darkBackground : AppColors.lightBackground,
-      child: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              'Verifying Fuel Pass',
-              style: GoogleFonts.spaceGrotesk(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: isDark ? AppColors.darkText : AppColors.lightText,
-              ),
-            ),
-            const SizedBox(height: 24),
-            ..._verificationSteps.map(
-              (step) => _buildVerificationStep(step, isDark),
-            ),
-            const SizedBox(height: 20),
-            if (_verificationFailed)
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  color: AppColors.error.withOpacity(0.1),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.error_outline, color: AppColors.error, size: 20),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        _verificationError ?? 'Verification failed',
-                        style: GoogleFonts.inter(
-                          fontSize: 12,
-                          color: AppColors.error,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildVerificationStep(VerificationStep step, bool isDark) {
-    Color getStatusColor() {
-      switch (step.status) {
-        case VerificationStatus.completed:
-          return AppColors.emerald;
-        case VerificationStatus.failed:
-          return AppColors.error;
-        case VerificationStatus.loading:
-          return AppColors.ocean;
-        default:
-          return isDark ? AppColors.darkTextMuted : AppColors.lightTextMuted;
-      }
-    }
-
-    IconData getStatusIcon() {
-      switch (step.status) {
-        case VerificationStatus.completed:
-          return Icons.check_circle_rounded;
-        case VerificationStatus.failed:
-          return Icons.error_outline;
-        case VerificationStatus.loading:
-          return Icons.hourglass_empty_rounded;
-        default:
-          return step.icon;
-      }
-    }
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: getStatusColor().withOpacity(0.1),
-            ),
-            child: step.status == VerificationStatus.loading
-                ? SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        getStatusColor(),
-                      ),
-                    ),
-                  )
-                : Icon(getStatusIcon(), size: 18, color: getStatusColor()),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  step.title,
-                  style: GoogleFonts.spaceGrotesk(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: step.status == VerificationStatus.failed
-                        ? AppColors.error
-                        : (isDark ? AppColors.darkText : AppColors.lightText),
-                  ),
-                ),
-                Text(
-                  step.message ?? step.subtitle,
-                  style: GoogleFonts.inter(
-                    fontSize: 11,
-                    color: step.status == VerificationStatus.failed
-                        ? AppColors.error
-                        : (isDark
-                              ? AppColors.darkTextSub
-                              : AppColors.lightTextSub),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDataDisplayScreen(bool isDark) {
     return Container(
       width: double.infinity,
       color: isDark ? AppColors.darkBackground : AppColors.lightBackground,
@@ -795,78 +1112,58 @@ class _StaffQrScannerScreenState extends State<StaffQrScannerScreen>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
+            // Read-only text field (unselectable)
             Container(
-              width: 70,
-              height: 70,
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: const LinearGradient(
-                  colors: [AppColors.emerald, AppColors.ocean],
-                ),
-              ),
-              child: const Icon(
-                Icons.verified_rounded,
-                color: Colors.white,
-                size: 35,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Fuel Pass Verified',
-              style: GoogleFonts.spaceGrotesk(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: AppColors.emerald,
-              ),
-            ),
-            const SizedBox(height: 20),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(14),
                 color: isDark ? AppColors.darkSurface : Colors.white,
                 border: Border.all(
                   color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
                 ),
               ),
-              child: Column(
+              child: Row(
                 children: [
-                  _buildInfoRow(
-                    Icons.directions_car_rounded,
-                    'Registration No',
-                    _verifiedData?['registrationNo'] ?? 'N/A',
-                    isDark,
-                  ),
-                  const Divider(height: 16),
-                  _buildInfoRow(
-                    Icons.category_rounded,
-                    'Vehicle Type',
-                    '${_verifiedData?['make']} ${_verifiedData?['model']}',
-                    isDark,
-                  ),
-                  const Divider(height: 16),
-                  _buildInfoRow(
-                    Icons.local_gas_station_rounded,
-                    'Fuel Type',
-                    _verifiedData?['fuelType'] ?? 'N/A',
-                    isDark,
-                  ),
-                  const Divider(height: 16),
-                  _buildInfoRow(
-                    Icons.opacity_rounded,
-                    'Available Quota',
-                    '${(_verifiedData?['remainingQuota'] ?? 0).toStringAsFixed(1)} L',
-                    isDark,
-                  ),
-                  const Divider(height: 16),
-                  _buildInfoRow(
-                    Icons.account_balance_wallet_rounded,
-                    'Wallet Balance',
-                    'LKR ${(_verifiedData?['balance'] ?? 0).toStringAsFixed(2)}',
-                    isDark,
+                  const Icon(Icons.opacity_rounded, size: 20),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: IgnorePointer(
+                      ignoring: true,
+                      child: TextField(
+                        controller: _litresController,
+                        style: GoogleFonts.spaceGrotesk(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        decoration: InputDecoration(
+                          hintText: '0.00',
+                          hintStyle: GoogleFonts.spaceGrotesk(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.grey,
+                          ),
+                          border: InputBorder.none,
+                          suffixText: 'L',
+                          suffixStyle: GoogleFonts.spaceGrotesk(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
                 ],
               ),
+            ),
+            const SizedBox(height: 20),
+            // Number Pad
+            _buildNumberPad(isDark),
+            const SizedBox(height: 16),
+            // Info text
+            Text(
+              'Max available: ${availableQuota.toStringAsFixed(1)} L',
+              style: GoogleFonts.inter(fontSize: 12, color: AppColors.ocean),
             ),
           ],
         ),
@@ -874,37 +1171,74 @@ class _StaffQrScannerScreenState extends State<StaffQrScannerScreen>
     );
   }
 
-  Widget _buildInfoRow(IconData icon, String label, String value, bool isDark) {
-    return Row(
-      children: [
-        Icon(
-          icon,
-          size: 20,
-          color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            label,
-            style: GoogleFonts.inter(
-              fontSize: 13,
-              color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
-            ),
+  Widget _buildNumberPad(bool isDark) {
+    final buttons = [
+      ['1', '2', '3'],
+      ['4', '5', '6'],
+      ['7', '8', '9'],
+      ['.', '0', 'clear'],
+    ];
+
+    return Column(
+      children: buttons.map((row) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: row.map((btn) {
+              return Expanded(
+                child: GestureDetector(
+                  onTap: () => _onNumberPadTap(btn),
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 8),
+                    height: 65,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(16),
+                      color: isDark ? AppColors.darkSurface : Colors.white,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.05),
+                          blurRadius: 5,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Center(
+                      child: btn == 'clear'
+                          ? Icon(
+                              Icons.backspace_rounded,
+                              size: 28,
+                              color: AppColors.error,
+                            )
+                          : Text(
+                              btn,
+                              style: GoogleFonts.spaceGrotesk(
+                                fontSize: 28,
+                                fontWeight: FontWeight.w600,
+                                color: isDark
+                                    ? AppColors.darkText
+                                    : AppColors.lightText,
+                              ),
+                            ),
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
           ),
-        ),
-        Text(
-          value,
-          style: GoogleFonts.spaceGrotesk(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: isDark ? AppColors.darkText : AppColors.lightText,
-          ),
-        ),
-      ],
+        );
+      }).toList(),
     );
   }
 
   Widget _buildBottomBar(bool isDark) {
+    double enteredLitres = double.tryParse(_litresInput) ?? 0;
+    bool isRefillEnabled =
+        _verificationComplete &&
+        _verifiedData != null &&
+        _litresInput.isNotEmpty &&
+        enteredLitres > 0;
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -923,77 +1257,15 @@ class _StaffQrScannerScreenState extends State<StaffQrScannerScreen>
       ),
       child: SafeArea(
         child: _verificationComplete && _verifiedData != null
-            ? Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Disabled Refill Button
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: null,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.emerald.withOpacity(0.5),
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.local_gas_station_rounded, size: 18),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Refill (Coming Soon)',
-                            style: GoogleFonts.spaceGrotesk(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedAppButton(
-                          label: 'Exit',
-                          onPressed: _exitToLogin,
-                          icon: Icons.exit_to_app_rounded,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: GradientButton(
-                          label: 'Next',
-                          onPressed: _resetScanner,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              )
-            : (_hasScanned && !_isVerifying && !_verificationComplete)
-            ? Row(
-                children: [
-                  Expanded(
-                    child: OutlinedAppButton(
-                      label: 'Cancel',
-                      onPressed: _exitToLogin,
-                      icon: Icons.close_rounded,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: GradientButton(
-                      label: 'Verify',
-                      onPressed: () => _verifyPasscode(_extractedValue!),
-                    ),
-                  ),
-                ],
+            ? SizedBox(
+                width: double.infinity,
+                child: GradientButton(
+                  label: _isRefilling ? 'Processing...' : 'Refill',
+                  onPressed: isRefillEnabled && !_isRefilling
+                      ? _onRefillPressed
+                      : null,
+                  isLoading: _isRefilling,
+                ),
               )
             : OutlinedAppButton(
                 label: 'Cancel',

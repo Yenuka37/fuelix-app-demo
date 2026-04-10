@@ -22,8 +22,6 @@ class ApiService {
 
   // ==================== STAFF AUTHENTICATION FOR QR SCANNER ====================
 
-  // Add/Update this method in ApiService class
-
   // Staff authentication for QR scanner
   Future<Map<String, dynamic>> authenticateStaff(
     String nic,
@@ -50,7 +48,6 @@ class ApiService {
       final data = json.decode(response.body);
 
       if (response.statusCode == 200) {
-        // Save token for subsequent requests
         if (data['token'] != null && data['token'].toString().isNotEmpty) {
           await saveToken(data['token']);
         }
@@ -127,8 +124,6 @@ class ApiService {
     await prefs.remove('staff_name');
   }
 
-  // Add this method to ApiService class
-
   // Staff QR verification with full steps
   Future<Map<String, dynamic>> staffVerifyPasscode(String passcode) async {
     try {
@@ -161,6 +156,64 @@ class ApiService {
       }
     } catch (e) {
       print('Staff verification error: $e');
+      return {'success': false, 'error': 'Network error: ${e.toString()}'};
+    }
+  }
+
+  // Add fuel log from staff QR scanner
+  Future<Map<String, dynamic>> addFuelLogFromStaff({
+    required int vehicleId,
+    required int userId,
+    required double litres,
+    required String fuelType,
+    required String vehicleType,
+    required String stationName,
+  }) async {
+    try {
+      final token = await getToken();
+      if (token == null) {
+        return {'success': false, 'error': 'Not authenticated'};
+      }
+
+      // Get fuel grade based on fuel type
+      String fuelGrade = fuelType == 'Petrol' ? 'Petrol 92' : 'Auto Diesel';
+
+      final Map<String, dynamic> logData = {
+        'userId': userId,
+        'vehicleId': vehicleId,
+        'litres': litres,
+        'fuelType': fuelType,
+        'fuelGrade': fuelGrade,
+        'vehicleType': vehicleType,
+        'stationName': stationName,
+      };
+
+      print('Adding fuel log: $logData');
+
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/fuel-logs'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: json.encode(logData),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+      print('Add fuel log response: $data');
+
+      if (response.statusCode == 200) {
+        return {'success': true, 'data': data};
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to add fuel log',
+        };
+      }
+    } catch (e) {
+      print('Add fuel log error: $e');
       return {'success': false, 'error': 'Network error: ${e.toString()}'};
     }
   }
