@@ -56,6 +56,7 @@ class _FuelLogScreenState extends State<FuelLogScreen>
 
   final _litresCtrl = TextEditingController();
   final _fuelAmountCtrl = TextEditingController();
+  final _stationCtrl = TextEditingController();
 
   bool _isSaving = false;
   double _quotaRemaining = 0;
@@ -67,7 +68,6 @@ class _FuelLogScreenState extends State<FuelLogScreen>
   late AnimationController _animCtrl;
   late Animation<double> _fadeAnim;
 
-  // Tutorial keys
   final _keyVehicleSelector = GlobalKey();
   final _keyGradeSelector = GlobalKey();
   final _keyLitresField = GlobalKey();
@@ -75,7 +75,6 @@ class _FuelLogScreenState extends State<FuelLogScreen>
   final _keySaveButton = GlobalKey();
   bool _showTour = false;
 
-  // Flag to track if this is a pre-scanned flow
   bool get _isPreScanned =>
       widget.selectedVehicleId != null && widget.vehicles.length == 1;
 
@@ -108,13 +107,11 @@ class _FuelLogScreenState extends State<FuelLogScreen>
     _vehicles = List.from(widget.vehicles);
     _walletBalance = widget.walletBalance;
 
-    // If pre-scanned quota is provided, use it
     if (widget.preScannedQuota != null) {
       _quotaRemaining = widget.preScannedQuota!;
     }
 
     if (_vehicles.isNotEmpty) {
-      // If selectedVehicleId is provided, use that vehicle
       if (widget.selectedVehicleId != null) {
         _selectedVehicle = _vehicles.firstWhere(
           (v) => v.id == widget.selectedVehicleId,
@@ -146,6 +143,7 @@ class _FuelLogScreenState extends State<FuelLogScreen>
   void dispose() {
     _litresCtrl.dispose();
     _fuelAmountCtrl.dispose();
+    _stationCtrl.dispose();
     _animCtrl.dispose();
     super.dispose();
   }
@@ -237,7 +235,6 @@ class _FuelLogScreenState extends State<FuelLogScreen>
           _selectedVehicle.fuelType.toLowerCase();
     }).toList();
 
-    // Only fetch quota if not pre-scanned
     double remaining = _quotaRemaining;
     if (!_isPreScanned || _quotaRemaining == 0) {
       final quotaResult = await _apiService.getCurrentQuota(
@@ -294,7 +291,7 @@ class _FuelLogScreenState extends State<FuelLogScreen>
       'fuelType': _selectedVehicle.fuelType,
       'fuelGrade': _selectedGrade!.name,
       'vehicleType': _selectedVehicle.type,
-      'stationName': '', // Empty for scanned flow
+      'stationName': _stationCtrl.text.trim(),
     };
 
     final result = await _apiService.addFuelLog(logData);
@@ -542,7 +539,6 @@ class _FuelLogScreenState extends State<FuelLogScreen>
                                     ),
                                     const SizedBox(height: 20),
 
-                                    // Fuel Amount Field (Number Pad)
                                     _sectionLabel('Amount (LKR)', isDark),
                                     const SizedBox(height: 8),
                                     KeyedSubtree(
@@ -551,12 +547,19 @@ class _FuelLogScreenState extends State<FuelLogScreen>
                                     ),
                                     const SizedBox(height: 20),
 
-                                    // Litres Field (Auto-calculated from amount)
                                     _sectionLabel('Litres Filled', isDark),
                                     const SizedBox(height: 8),
                                     KeyedSubtree(
                                       key: _keyLitresField,
                                       child: _buildLitresField(isDark),
+                                    ),
+                                    const SizedBox(height: 20),
+
+                                    AppTextField(
+                                      label: 'Station Name',
+                                      hint: 'e.g. CPC Colombo 7',
+                                      controller: _stationCtrl,
+                                      prefixIcon: Icons.place_outlined,
                                     ),
                                     const SizedBox(height: 20),
 
@@ -1056,7 +1059,6 @@ class _FuelLogScreenState extends State<FuelLogScreen>
             ),
           ),
           onChanged: (value) {
-            // Update amount field when litres is manually edited
             final litres = double.tryParse(value) ?? 0;
             if (litres > 0 && _selectedGrade != null) {
               final amount = litres * _selectedGrade!.pricePerLitre;

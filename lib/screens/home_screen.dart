@@ -14,6 +14,7 @@ import '../widgets/tutorial_overlay.dart';
 import '../screens/fuel_log_screen.dart';
 import '../screens/notifications_screen.dart';
 import '../screens/qr_scanner_screen.dart';
+import '../screens/fuel_log_history_screen.dart';
 import 'home/widgets/top_bar.dart';
 import 'home/widgets/welcome_card.dart';
 import 'home/widgets/stats_row.dart';
@@ -54,7 +55,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   final _keyVehicles = GlobalKey();
   final _keyWallet = GlobalKey();
   final _keyActions = GlobalKey();
-  final _keyFuelLogAction = GlobalKey();
+  final _keyLogHistoryAction = GlobalKey();
   final _keyNotifications = GlobalKey();
   final _keyRefreshButton = GlobalKey();
   final _keyQrScan = GlobalKey();
@@ -292,26 +293,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     });
   }
 
-  void _openFuelLogScreen() {
-    if (_vehicles.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Add a vehicle first before logging fuel.'),
-          backgroundColor: AppColors.error,
-        ),
-      );
-      return;
-    }
+  void _openFuelLogHistory() {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => FuelLogScreen(
-          user: _user!,
-          vehicles: _vehicles,
-          walletBalance: _wallet?.balance ?? 0.0,
-        ),
+        builder: (context) =>
+            FuelLogHistoryScreen(user: _user!, vehicles: _vehicles),
       ),
-    ).then((_) => _loadAll());
+    );
   }
 
   void _logout() {
@@ -361,6 +350,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final hasFuelLogs = _recentLogs.isNotEmpty;
 
     final screen = Scaffold(
       body: Container(
@@ -465,7 +455,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         padding: const EdgeInsets.symmetric(horizontal: 24),
                         child: QuickActions(
                           isDark: isDark,
-                          onFuelLog: _openFuelLogScreen,
+                          onLogHistory: _openFuelLogHistory,
                           onAnalytics: () {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
@@ -475,22 +465,23 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           },
                           onFuelStations: _goToFuelStations,
                           onTopUp: _goToTopUp,
-                          fuelLogKey: _keyFuelLogAction,
+                          logHistoryKey: _keyLogHistoryAction,
                         ),
                       ),
                     ),
-                    SliverToBoxAdapter(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(24, 28, 24, 14),
-                        child: RecentFuelLogs(
-                          recentLogs: _recentLogs,
-                          vehicles: _vehicles,
-                          isDark: isDark,
-                          onAddLog: _openFuelLogScreen,
-                          onRefresh: _loadAll,
+                    // Recent Fuel Logs - Only show if there are logs
+                    if (hasFuelLogs)
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(24, 28, 24, 14),
+                          child: RecentFuelLogs(
+                            recentLogs: _recentLogs,
+                            vehicles: _vehicles,
+                            isDark: isDark,
+                            onRefresh: _loadAll,
+                          ),
                         ),
                       ),
-                    ),
                     const SliverToBoxAdapter(child: SizedBox(height: 40)),
                   ],
                 ),
@@ -536,17 +527,17 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           targetKey: _keyActions,
           title: 'Quick Actions',
           body:
-              'Quick access to main features: Fuel Log, Analytics, Fuel Stations, and Top Up.',
+              'Quick access to main features: Log History, Analytics, Fuel Stations, and Top Up.',
           icon: Icons.grid_view_rounded,
           gradient: [AppColors.amber, AppColors.emerald],
           position: TooltipPosition.below,
         ),
         TourStep(
-          targetKey: _keyFuelLogAction,
-          title: 'Log Fuel',
+          targetKey: _keyLogHistoryAction,
+          title: 'Log History',
           body:
-              'Tap here to record your fuel refills. You\'ll need a vehicle added first.',
-          icon: Icons.local_gas_station_rounded,
+              'Tap here to view your complete fuel refill history, grouped by month.',
+          icon: Icons.history_rounded,
           gradient: [AppColors.emerald, AppColors.ocean],
           position: TooltipPosition.above,
         ),

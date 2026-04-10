@@ -10,7 +10,6 @@ class RecentFuelLogs extends StatefulWidget {
   final List<FuelLogModel> recentLogs;
   final List<VehicleModel> vehicles;
   final bool isDark;
-  final VoidCallback onAddLog;
   final VoidCallback onRefresh;
 
   const RecentFuelLogs({
@@ -18,7 +17,6 @@ class RecentFuelLogs extends StatefulWidget {
     required this.recentLogs,
     required this.vehicles,
     required this.isDark,
-    required this.onAddLog,
     required this.onRefresh,
   });
 
@@ -113,80 +111,34 @@ class _RecentFuelLogsState extends State<RecentFuelLogs> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Text(
-              'Recent Fuel Logs',
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
-            const Spacer(),
-            if (widget.recentLogs.isNotEmpty)
-              GestureDetector(
-                onTap: widget.onAddLog,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(20),
-                    color: AppColors.emerald.withOpacity(
-                      widget.isDark ? 0.12 : 0.08,
-                    ),
-                    border: Border.all(
-                      color: AppColors.emerald.withOpacity(0.3),
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.add_rounded,
-                        size: 13,
-                        color: AppColors.emerald,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        'Add Log',
-                        style: GoogleFonts.spaceGrotesk(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.emerald,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-          ],
+        Text(
+          'Recent Fuel Logs',
+          style: Theme.of(context).textTheme.headlineSmall,
         ),
         const SizedBox(height: 12),
-        if (widget.recentLogs.isEmpty)
-          _EmptyActivity(isDark: widget.isDark, onTap: widget.onAddLog)
-        else
-          Column(
-            children: widget.recentLogs.take(5).map((log) {
-              final vehicle = widget.vehicles.firstWhere(
-                (v) => v.id == log.vehicleId,
-                orElse: () => VehicleModel(
-                  userId: log.userId,
-                  type: 'Car',
-                  make: 'Unknown',
-                  model: '',
-                  year: '',
-                  registrationNo: '',
-                  fuelType: log.fuelType,
-                ),
-              );
-              return _FuelLogTile(
-                log: log,
-                vehicle: vehicle,
-                isDark: widget.isDark,
-                onDelete: () => _showDeleteConfirm(log),
-                isDeleting: _isDeleting,
-              );
-            }).toList(),
-          ),
+        Column(
+          children: widget.recentLogs.take(5).map((log) {
+            final vehicle = widget.vehicles.firstWhere(
+              (v) => v.id == log.vehicleId,
+              orElse: () => VehicleModel(
+                userId: log.userId,
+                type: 'Car',
+                make: 'Unknown',
+                model: '',
+                year: '',
+                registrationNo: '',
+                fuelType: log.fuelType,
+              ),
+            );
+            return _FuelLogTile(
+              log: log,
+              vehicle: vehicle,
+              isDark: widget.isDark,
+              onDelete: () => _showDeleteConfirm(log),
+              isDeleting: _isDeleting,
+            );
+          }).toList(),
+        ),
       ],
     );
   }
@@ -345,86 +297,6 @@ class _FuelLogTile extends StatelessWidget {
               ],
             ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _EmptyActivity extends StatelessWidget {
-  final bool isDark;
-  final VoidCallback onTap;
-
-  const _EmptyActivity({required this.isDark, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 20),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-          border: Border.all(
-            color: AppColors.emerald.withOpacity(0.25),
-            width: 1.5,
-          ),
-        ),
-        child: Column(
-          children: [
-            Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: AppColors.emerald.withOpacity(isDark ? 0.12 : 0.08),
-              ),
-              child: const Icon(
-                Icons.local_gas_station_rounded,
-                size: 26,
-                color: AppColors.emerald,
-              ),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              'No fuel logs yet',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                color: isDark ? AppColors.darkTextSub : AppColors.lightTextSub,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Tap here to log your first refuel',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(20),
-                gradient: const LinearGradient(
-                  colors: [AppColors.emerald, AppColors.ocean],
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.add_rounded, size: 16, color: Colors.white),
-                  const SizedBox(width: 6),
-                  Text(
-                    'Add Fuel Log',
-                    style: GoogleFonts.spaceGrotesk(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
         ),
       ),
     );

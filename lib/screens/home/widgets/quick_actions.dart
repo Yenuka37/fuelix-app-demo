@@ -4,20 +4,20 @@ import '../../../theme/app_theme.dart';
 
 class QuickActions extends StatelessWidget {
   final bool isDark;
-  final VoidCallback onFuelLog;
+  final VoidCallback onLogHistory;
   final VoidCallback onAnalytics;
   final VoidCallback onFuelStations;
   final VoidCallback onTopUp;
-  final Key? fuelLogKey;
+  final Key? logHistoryKey;
 
   const QuickActions({
     super.key,
     required this.isDark,
-    required this.onFuelLog,
+    required this.onLogHistory,
     required this.onAnalytics,
     required this.onFuelStations,
     required this.onTopUp,
-    this.fuelLogKey,
+    this.logHistoryKey,
   });
 
   @override
@@ -28,13 +28,13 @@ class QuickActions extends StatelessWidget {
           children: [
             Expanded(
               child: _ActionCard(
-                icon: Icons.local_gas_station_rounded,
-                label: 'Fuel Log',
-                sublabel: 'Track refuels',
+                icon: Icons.history_rounded,
+                label: 'Log History',
+                sublabel: 'View fuel records',
                 gradient: [AppColors.emerald, AppColors.emeraldDark],
                 isDark: isDark,
-                onTap: onFuelLog,
-                key: fuelLogKey,
+                onTap: onLogHistory,
+                key: logHistoryKey,
               ),
             ),
             const SizedBox(width: 14),
