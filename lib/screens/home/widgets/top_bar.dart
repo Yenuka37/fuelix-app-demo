@@ -9,9 +9,7 @@ class TopBar extends StatefulWidget {
   final bool isDark;
   final VoidCallback onProfileTap;
   final VoidCallback onNotificationsTap;
-  final VoidCallback onQrScanTap;
   final Key? notificationsKey;
-  final Key? qrScanKey;
 
   const TopBar({
     super.key,
@@ -20,9 +18,7 @@ class TopBar extends StatefulWidget {
     required this.isDark,
     required this.onProfileTap,
     required this.onNotificationsTap,
-    required this.onQrScanTap,
     this.notificationsKey,
-    this.qrScanKey,
   });
 
   @override
@@ -96,14 +92,6 @@ class _TopBarState extends State<TopBar> with TickerProviderStateMixin {
     super.dispose();
   }
 
-  /// Check if user is staff or admin (should see QR scanner)
-  bool get _showQrScanner {
-    final role = widget.user?.role?.toUpperCase() ?? '';
-    final shouldShow = role == 'STAFF' || role == 'ADMIN';
-    print('TopBar - _showQrScanner: $shouldShow (role: $role)');
-    return shouldShow;
-  }
-
   @override
   Widget build(BuildContext context) {
     final hasUnread = widget.unreadCount > 0;
@@ -143,38 +131,6 @@ class _TopBarState extends State<TopBar> with TickerProviderStateMixin {
           ),
         ),
         const Spacer(),
-        // QR Scanner Button - Only visible for STAFF or ADMIN
-        if (_showQrScanner) ...[
-          KeyedSubtree(
-            key: widget.qrScanKey,
-            child: GestureDetector(
-              onTap: widget.onQrScanTap,
-              child: Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(10),
-                  color: widget.isDark
-                      ? AppColors.darkSurfaceAlt
-                      : AppColors.lightSurfaceAlt,
-                  border: Border.all(
-                    color: widget.isDark
-                        ? AppColors.darkBorder
-                        : AppColors.lightBorder,
-                  ),
-                ),
-                child: Icon(
-                  Icons.qr_code_scanner_rounded,
-                  size: 20,
-                  color: widget.isDark
-                      ? AppColors.darkTextSub
-                      : AppColors.lightTextSub,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-        ],
         KeyedSubtree(
           key: widget.notificationsKey,
           child: GestureDetector(

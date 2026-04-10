@@ -30,7 +30,6 @@ class FuelLogScreen extends StatefulWidget {
   final List<VehicleModel> vehicles;
   final double walletBalance;
   final int? selectedVehicleId;
-  final double? preScannedQuota;
 
   const FuelLogScreen({
     super.key,
@@ -38,7 +37,6 @@ class FuelLogScreen extends StatefulWidget {
     required this.vehicles,
     required this.walletBalance,
     this.selectedVehicleId,
-    this.preScannedQuota,
   });
 
   @override
@@ -75,9 +73,6 @@ class _FuelLogScreenState extends State<FuelLogScreen>
   final _keySaveButton = GlobalKey();
   bool _showTour = false;
 
-  bool get _isPreScanned =>
-      widget.selectedVehicleId != null && widget.vehicles.length == 1;
-
   double get _maxLitres {
     if (_selectedGrade == null) return _quotaRemaining;
     final walletLitres = _walletBalance / _selectedGrade!.pricePerLitre;
@@ -106,10 +101,6 @@ class _FuelLogScreenState extends State<FuelLogScreen>
 
     _vehicles = List.from(widget.vehicles);
     _walletBalance = widget.walletBalance;
-
-    if (widget.preScannedQuota != null) {
-      _quotaRemaining = widget.preScannedQuota!;
-    }
 
     if (_vehicles.isNotEmpty) {
       if (widget.selectedVehicleId != null) {
@@ -235,15 +226,13 @@ class _FuelLogScreenState extends State<FuelLogScreen>
           _selectedVehicle.fuelType.toLowerCase();
     }).toList();
 
-    double remaining = _quotaRemaining;
-    if (!_isPreScanned || _quotaRemaining == 0) {
-      final quotaResult = await _apiService.getCurrentQuota(
-        _selectedVehicle.id!,
-        _selectedVehicle.type,
-      );
-      if (quotaResult['success']) {
-        remaining = quotaResult['data']['remainingLitres']?.toDouble() ?? 0;
-      }
+    final quotaResult = await _apiService.getCurrentQuota(
+      _selectedVehicle.id!,
+      _selectedVehicle.type,
+    );
+    double remaining = 0;
+    if (quotaResult['success']) {
+      remaining = quotaResult['data']['remainingLitres']?.toDouble() ?? 0;
     }
 
     final walletResult = await _apiService.getWallet(widget.user.id!);
@@ -438,36 +427,35 @@ class _FuelLogScreenState extends State<FuelLogScreen>
                       const SizedBox(width: 14),
                       Expanded(
                         child: Text(
-                          _isPreScanned ? 'Log Fuel (Scanned)' : 'Log Fuel',
+                          'Log Fuel',
                           style: Theme.of(context).textTheme.headlineMedium,
                         ),
                       ),
-                      if (!_isPreScanned)
-                        GestureDetector(
-                          onTap: _refreshVehicles,
-                          child: Container(
-                            width: 42,
-                            height: 42,
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(12),
+                      GestureDetector(
+                        onTap: _refreshVehicles,
+                        child: Container(
+                          width: 42,
+                          height: 42,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            color: isDark
+                                ? AppColors.darkSurfaceAlt
+                                : AppColors.lightSurfaceAlt,
+                            border: Border.all(
                               color: isDark
-                                  ? AppColors.darkSurfaceAlt
-                                  : AppColors.lightSurfaceAlt,
-                              border: Border.all(
-                                color: isDark
-                                    ? AppColors.darkBorder
-                                    : AppColors.lightBorder,
-                              ),
-                            ),
-                            child: Icon(
-                              Icons.refresh_rounded,
-                              size: 18,
-                              color: isDark
-                                  ? AppColors.darkTextSub
-                                  : AppColors.lightTextSub,
+                                  ? AppColors.darkBorder
+                                  : AppColors.lightBorder,
                             ),
                           ),
+                          child: Icon(
+                            Icons.refresh_rounded,
+                            size: 18,
+                            color: isDark
+                                ? AppColors.darkTextSub
+                                : AppColors.lightTextSub,
+                          ),
                         ),
+                      ),
                     ],
                   ),
                 ),
@@ -491,22 +479,18 @@ class _FuelLogScreenState extends State<FuelLogScreen>
                                 const SizedBox(height: 8),
                                 KeyedSubtree(
                                   key: _keyVehicleSelector,
-                                  child: _isPreScanned
-                                      ? _buildLockedVehicleTile(isDark)
-                                      : _dropdown<VehicleModel>(
-                                          isDark: isDark,
-                                          value: _selectedVehicle,
-                                          items: _vehicles,
-                                          itemLabel: (v) =>
-                                              '${v.shortDisplay} · ${v.registrationNo}',
-                                          onChanged: (v) async {
-                                            if (v == null) return;
-                                            setState(
-                                              () => _selectedVehicle = v,
-                                            );
-                                            await _checkFuelPassAndLoad();
-                                          },
-                                        ),
+                                  child: _dropdown<VehicleModel>(
+                                    isDark: isDark,
+                                    value: _selectedVehicle,
+                                    items: _vehicles,
+                                    itemLabel: (v) =>
+                                        '${v.shortDisplay} · ${v.registrationNo}',
+                                    onChanged: (v) async {
+                                      if (v == null) return;
+                                      setState(() => _selectedVehicle = v);
+                                      await _checkFuelPassAndLoad();
+                                    },
+                                  ),
                                 ),
                                 const SizedBox(height: 20),
 
@@ -598,10 +582,9 @@ class _FuelLogScreenState extends State<FuelLogScreen>
       steps: [
         TourStep(
           targetKey: _keyVehicleSelector,
-          title: _isPreScanned ? 'Scanned Vehicle' : 'Select Vehicle',
-          body: _isPreScanned
-              ? 'This vehicle was scanned via QR code. Proceed with fuel logging.'
-              : 'Choose the vehicle you refueled. Each vehicle has its own quota.',
+          title: 'Select Vehicle',
+          body:
+              'Choose the vehicle you refueled. Each vehicle has its own quota.',
           icon: Icons.directions_car_rounded,
           gradient: [AppColors.ocean, AppColors.emerald],
           position: TooltipPosition.below,
@@ -646,90 +629,6 @@ class _FuelLogScreenState extends State<FuelLogScreen>
         if (mounted) setState(() => _showTour = false);
       },
       child: screen,
-    );
-  }
-
-  Widget _buildLockedVehicleTile(bool isDark) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-        border: Border.all(
-          color: AppColors.emerald.withOpacity(0.5),
-          width: 1.5,
-        ),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(10),
-              gradient: const LinearGradient(
-                colors: [AppColors.emerald, AppColors.ocean],
-              ),
-            ),
-            child: const Icon(
-              Icons.qr_code_scanner_rounded,
-              color: Colors.white,
-              size: 20,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _selectedVehicle.registrationNo.toUpperCase(),
-                  style: GoogleFonts.spaceGrotesk(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: isDark ? AppColors.darkText : AppColors.lightText,
-                  ),
-                ),
-                Text(
-                  _selectedVehicle.displayName,
-                  style: GoogleFonts.inter(
-                    fontSize: 12,
-                    color: isDark
-                        ? AppColors.darkTextSub
-                        : AppColors.lightTextSub,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(20),
-              color: AppColors.emerald.withOpacity(0.1),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(
-                  Icons.verified_rounded,
-                  size: 12,
-                  color: AppColors.emerald,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  'Scanned',
-                  style: GoogleFonts.inter(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.emerald,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
     );
   }
 
