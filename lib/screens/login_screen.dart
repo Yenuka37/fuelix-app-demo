@@ -9,6 +9,8 @@ import '../services/tutorial_service.dart';
 import '../widgets/custom_button.dart';
 import 'onboarding_screen.dart';
 import 'forgot_password_screen.dart';
+import '../widgets/staff_auth_dialog.dart';
+import 'staff_qr_scanner_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -110,7 +112,7 @@ class _LoginScreenState extends State<LoginScreen>
           postalCode: userData['postalCode'] ?? '',
           email: userData['email'],
           password: _passwordController.text,
-          role: userData['role'], // ✅ Add this line
+          role: userData['role'],
           createdAt: userData['createdAt'] != null
               ? DateTime.tryParse(userData['createdAt'])
               : null,
@@ -161,6 +163,27 @@ class _LoginScreenState extends State<LoginScreen>
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  void _openStaffAuth() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StaffAuthDialog(
+        onSuccess: () {
+          // Authentication successful, open QR scanner
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => const StaffQrScannerScreen(),
+            ),
+          );
+        },
+        onFailure: () {
+          // Just close, stay on login screen
+        },
+      ),
+    );
   }
 
   @override
@@ -398,7 +421,14 @@ class _LoginScreenState extends State<LoginScreen>
                             ),
                           ],
                         ),
-                        const SizedBox(height: 24),
+                        const SizedBox(height: 16),
+                        // Staff QR Scanner Button
+                        OutlinedAppButton(
+                          label: 'Staff QR Scanner',
+                          icon: Icons.qr_code_scanner_rounded,
+                          onPressed: _openStaffAuth,
+                        ),
+                        const SizedBox(height: 8),
                         // Sign up button
                         OutlinedAppButton(
                           label: 'Create new account',

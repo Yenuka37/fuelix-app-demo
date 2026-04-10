@@ -20,6 +20,115 @@ class ApiService {
     await prefs.remove('auth_token');
   }
 
+  // ==================== STAFF AUTHENTICATION FOR QR SCANNER ====================
+
+  // Add/Update this method in ApiService class
+
+  // Staff authentication for QR scanner
+  Future<Map<String, dynamic>> authenticateStaff(
+    String nic,
+    String password,
+  ) async {
+    try {
+      print('Authenticating staff: $nic');
+
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/staff/auth'),
+            headers: {'Content-Type': 'application/json'},
+            body: json.encode({'nic': nic, 'password': password}),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      print('Response status: ${response.statusCode}');
+      print('Response body: ${response.body}');
+
+      if (response.body.isEmpty) {
+        return {'success': false, 'error': 'Empty response from server'};
+      }
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 200) {
+        // Save token for subsequent requests
+        if (data['token'] != null && data['token'].toString().isNotEmpty) {
+          await saveToken(data['token']);
+        }
+        return {'success': true, 'data': data};
+      } else if (response.statusCode == 401) {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Invalid NIC or password',
+        };
+      } else if (response.statusCode == 403) {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Access denied. Staff only.',
+        };
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Authentication failed',
+        };
+      }
+    } catch (e) {
+      print('Authentication error: $e');
+      return {'success': false, 'error': 'Network error: ${e.toString()}'};
+    }
+  }
+
+  // Save staff data locally
+  Future<void> saveStaffData(Map<String, dynamic> staffData) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (staffData['userId'] != null) {
+      await prefs.setInt('staff_user_id', staffData['userId']);
+    }
+    if (staffData['staffId'] != null) {
+      await prefs.setInt('staff_id', staffData['staffId']);
+    }
+    if (staffData['stationId'] != null) {
+      await prefs.setInt('station_id', staffData['stationId']);
+    }
+    if (staffData['stationName'] != null) {
+      await prefs.setString('station_name', staffData['stationName']);
+    }
+    if (staffData['stationBrand'] != null) {
+      await prefs.setString('station_brand', staffData['stationBrand']);
+    }
+    if (staffData['staffName'] != null) {
+      await prefs.setString('staff_name', staffData['staffName']);
+    }
+  }
+
+  // Get saved staff data
+  Future<Map<String, dynamic>?> getStaffData() async {
+    final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getInt('staff_user_id');
+    if (userId == null) return null;
+
+    return {
+      'userId': userId,
+      'staffId': prefs.getInt('staff_id'),
+      'stationId': prefs.getInt('station_id'),
+      'stationName': prefs.getString('station_name'),
+      'stationBrand': prefs.getString('station_brand'),
+      'staffName': prefs.getString('staff_name'),
+    };
+  }
+
+  // Clear staff data on logout
+  Future<void> clearStaffData() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('staff_user_id');
+    await prefs.remove('staff_id');
+    await prefs.remove('station_id');
+    await prefs.remove('station_name');
+    await prefs.remove('station_brand');
+    await prefs.remove('staff_name');
+  }
+
+  // ==================== AUTH APIs ====================
+
   // Send OTP to mobile
   Future<Map<String, dynamic>> sendMobileOTP(String mobile) async {
     try {
@@ -185,7 +294,7 @@ class ApiService {
     }
   }
 
-  // Get user by ID - NEEDS TO BE ADDED TO BACKEND
+  // Get user by ID
   Future<Map<String, dynamic>> getUserById(int userId) async {
     try {
       final token = await getToken();
@@ -217,6 +326,87 @@ class ApiService {
       return {'success': false, 'error': 'Network error: $e'};
     }
   }
+
+  // Update user profile
+  Future<Map<String, dynamic>> updateUserProfile(
+    int userId,
+    Map<String, dynamic> userData,
+  ) async {
+    try {
+      final token = await getToken();
+      if (token == null) {
+        return {'success': false, 'error': 'Not authenticated'};
+      }
+
+      final response = await http
+          .put(
+            Uri.parse('$baseUrl/auth/user/$userId'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: json.encode(userData),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 200) {
+        return {'success': true, 'data': data};
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to update profile',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
+  // Change password
+  Future<Map<String, dynamic>> changePassword(
+    int userId,
+    String oldPassword,
+    String newPassword,
+  ) async {
+    try {
+      final token = await getToken();
+      if (token == null) {
+        return {'success': false, 'error': 'Not authenticated'};
+      }
+
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/auth/change-password'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: json.encode({
+              'userId': userId,
+              'oldPassword': oldPassword,
+              'newPassword': newPassword,
+            }),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 200) {
+        return {'success': true, 'data': data};
+      } else {
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to change password',
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
+
+  // ==================== FUEL PRICE APIs ====================
 
   // Get all fuel prices from backend
   Future<Map<String, dynamic>> getFuelPrices() async {
